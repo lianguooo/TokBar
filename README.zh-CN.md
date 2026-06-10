@@ -49,13 +49,27 @@ TokBar 是一个跨平台桌面应用（macOS / Windows），用于分析你本�
 
 ## 支持的数据源
 
+开箱即用支持 15 个 AI Coding Agent（适配器逻辑移植自 ccusage）：
+
 | Agent | 数据位置 | 格式 |
 |---|---|---|
 | Claude Code | `$CLAUDE_CONFIG_DIR` / `~/.config/claude/projects` / `~/.claude/projects` | JSONL |
 | Codex CLI (OpenAI) | `$CODEX_HOME` 下 `sessions/` 与 `archived_sessions/` | JSONL |
+| Gemini CLI | `$GEMINI_DATA_DIR` 或 `~/.gemini/tmp` | JSON / JSONL |
+| OpenCode | `$OPENCODE_DATA_DIR` 或 `~/.local/share/opencode` | SQLite + JSON |
+| OpenClaw | `$OPENCLAW_DIR` 或 `~/.openclaw` | JSONL |
+| GitHub Copilot CLI | `~/.copilot/otel/*.jsonl` | OTEL JSONL |
+| Qwen Code | `$QWEN_DATA_DIR` 或 `~/.qwen` 下 `projects/*/chats/` | JSONL |
 | Kimi CLI | `$KIMI_DATA_DIR` 或 `~/.kimi` 下 `sessions/**/wire.jsonl` | JSONL |
+| Amp | `$AMP_DATA_DIR` 或 `~/.local/share/amp` 下 `threads/` | JSON |
+| Droid (Factory) | `$DROID_SESSIONS_DIR` 或 `~/.factory/sessions` | JSON |
+| Goose | Goose 数据目录或 `$GOOSE_PATH_ROOT` 下的 `sessions.db` | SQLite |
+| Kilo | `$KILO_DATA_DIR` 或 `~/.local/share/kilo` 下的 `kilo.db` | SQLite |
+| Codebuff | `~/.config/manicode*/projects` 或 `$CODEBUFF_DATA_DIR` | JSON |
+| Hermes Agent | `$HERMES_HOME` 或 `~/.hermes` 下的 `state.db` | SQLite |
+| pi-agent | `$PI_AGENT_DIR` 或 `~/.pi/agent/sessions` | JSONL |
 
-适配器架构（`src-tauri/src/adapters/`）可扩展更多 Agent（Gemini CLI、OpenCode、Copilot 等）。
+本机没有数据的来源会自动检测并保持为空，不影响使用。新增一个 Agent 只需在 `src-tauri/src/adapters/` 加一个文件。
 
 ## 安装
 

@@ -174,10 +174,9 @@ fn spawn_usage_watcher(handle: tauri::AppHandle) {
             Ok(w) => w,
             Err(_) => return,
         };
-        let dirs: Vec<PathBuf> = adapters::claude::data_dirs()
-            .into_iter()
-            .chain(adapters::codex::data_dirs())
-            .chain(adapters::kimi::data_dirs())
+        let dirs: Vec<PathBuf> = adapters::ALL
+            .iter()
+            .flat_map(|a| (a.data_dirs)())
             .collect();
         for dir in &dirs {
             let _ = watcher.watch(dir, RecursiveMode::Recursive);
@@ -349,32 +348,17 @@ struct SourceInfo {
 
 #[tauri::command]
 fn get_sources() -> Vec<SourceInfo> {
-    vec![
-        SourceInfo {
-            agent: adapters::claude::AGENT.to_string(),
-            dirs: adapters::claude::data_dirs()
+    adapters::ALL
+        .iter()
+        .map(|a| SourceInfo {
+            agent: a.agent.to_string(),
+            dirs: (a.data_dirs)()
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect(),
-            file_count: adapters::claude::collect_files().len(),
-        },
-        SourceInfo {
-            agent: adapters::codex::AGENT.to_string(),
-            dirs: adapters::codex::data_dirs()
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            file_count: adapters::codex::collect_files().len(),
-        },
-        SourceInfo {
-            agent: adapters::kimi::AGENT.to_string(),
-            dirs: adapters::kimi::data_dirs()
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            file_count: adapters::kimi::collect_files().len(),
-        },
-    ]
+            file_count: (a.collect_files)().len(),
+        })
+        .collect()
 }
 
 #[tauri::command]

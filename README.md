@@ -49,13 +49,27 @@ It is not a chat client. It is the dashboard for where your tokens and money go,
 
 ## Supported data sources
 
+15 AI coding agents out of the box (adapter logic ported from ccusage):
+
 | Agent | Location | Format |
 |---|---|---|
 | Claude Code | `$CLAUDE_CONFIG_DIR` / `~/.config/claude/projects` / `~/.claude/projects` | JSONL |
 | Codex CLI (OpenAI) | `sessions/` and `archived_sessions/` under `$CODEX_HOME` | JSONL |
+| Gemini CLI | `$GEMINI_DATA_DIR` or `~/.gemini/tmp` | JSON / JSONL |
+| OpenCode | `$OPENCODE_DATA_DIR` or `~/.local/share/opencode` | SQLite + JSON |
+| OpenClaw | `$OPENCLAW_DIR` or `~/.openclaw` | JSONL |
+| GitHub Copilot CLI | `~/.copilot/otel/*.jsonl` | OTEL JSONL |
+| Qwen Code | `projects/*/chats/` under `$QWEN_DATA_DIR` or `~/.qwen` | JSONL |
 | Kimi CLI | `sessions/**/wire.jsonl` under `$KIMI_DATA_DIR` or `~/.kimi` | JSONL |
+| Amp | `threads/` under `$AMP_DATA_DIR` or `~/.local/share/amp` | JSON |
+| Droid (Factory) | `$DROID_SESSIONS_DIR` or `~/.factory/sessions` | JSON |
+| Goose | `sessions.db` in the Goose data dir or `$GOOSE_PATH_ROOT` | SQLite |
+| Kilo | `kilo.db` under `$KILO_DATA_DIR` or `~/.local/share/kilo` | SQLite |
+| Codebuff | `~/.config/manicode*/projects` or `$CODEBUFF_DATA_DIR` | JSON |
+| Hermes Agent | `state.db` under `$HERMES_HOME` or `~/.hermes` | SQLite |
+| pi-agent | `$PI_AGENT_DIR` or `~/.pi/agent/sessions` | JSONL |
 
-The adapter architecture (`src-tauri/src/adapters/`) makes it straightforward to add more agents (Gemini CLI, OpenCode, Copilot, …).
+Sources with no local data are detected automatically and simply stay empty. Adding another agent is one file in `src-tauri/src/adapters/`.
 
 ## Install
 

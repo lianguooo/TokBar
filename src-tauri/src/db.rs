@@ -5,7 +5,7 @@ use chrono::{Local, TimeZone};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-use crate::adapters::{claude, codex, kimi};
+use crate::adapters;
 use crate::cost::calculate_cost;
 use crate::pricing::PricingMap;
 use crate::types::UsageRecord;
@@ -86,11 +86,10 @@ pub fn scan_all(
     let started = std::time::Instant::now();
     let mut stats = ScanStats::default();
 
-    let sources: Vec<(&str, Vec<PathBuf>)> = vec![
-        (claude::AGENT, claude::collect_files()),
-        (codex::AGENT, codex::collect_files()),
-        (kimi::AGENT, kimi::collect_files()),
-    ];
+    let sources: Vec<(&str, Vec<PathBuf>)> = adapters::ALL
+        .iter()
+        .map(|a| (a.agent, (a.collect_files)()))
+        .collect();
 
     // Pass 1: handle deleted files and find changed/new files.
     let mut changed: Vec<(&str, PathBuf, i64, i64)> = Vec::new();
@@ -149,11 +148,9 @@ pub fn scan_all(
     let total_changed = changed.len();
     for (i, (agent, file, mtime_ms, size)) in changed.iter().enumerate() {
         let path_str = file.to_string_lossy().to_string();
-        let records = match *agent {
-            claude::AGENT => claude::parse_file(file),
-            kimi::AGENT => kimi::parse_file(file),
-            _ => codex::parse_file(file),
-        };
+        let records = adapters::by_agent(agent)
+            .map(|a| (a.parse_file)(file))
+            .unwrap_or_default();
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM entries WHERE file_path = ?1", params![path_str])

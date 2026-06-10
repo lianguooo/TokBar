@@ -50,14 +50,29 @@ export const AGENT_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex CLI",
   kimi: "Kimi CLI",
+  gemini: "Gemini CLI",
+  opencode: "OpenCode",
+  openclaw: "OpenClaw",
+  copilot: "Copilot CLI",
+  qwen: "Qwen Code",
+  amp: "Amp",
+  droid: "Droid",
+  goose: "Goose",
+  kilo: "Kilo",
+  codebuff: "Codebuff",
+  hermes: "Hermes",
+  pi: "pi-agent",
 };
 
 // Chart colors reference theme variables so every chart re-colors with the
-// accent chosen in Settings (SVG fill/stroke accept var()).
+// accent chosen in Settings (SVG fill/stroke accept var()). Agents beyond
+// the named ones fall back to CHART_PALETTE by index.
 export const AGENT_COLORS: Record<string, string> = {
   "claude-code": "var(--chart-1)",
   codex: "var(--chart-2)",
   kimi: "var(--chart-3)",
+  gemini: "var(--chart-4)",
+  opencode: "var(--chart-5)",
 };
 
 export const CHART_PALETTE = [
