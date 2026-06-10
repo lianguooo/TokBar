@@ -65,6 +65,13 @@ html.quick-panel body {
   background: transparent;
 }
 
+/* On Windows/Linux the quick window is opaque, so paint the page background
+   to match the panel (the transparent corners would otherwise be white). */
+html.quick-panel-opaque,
+html.quick-panel-opaque body {
+  background: var(--background);
+}
+
 /* Recharts SVG elements get a default focus ring when clicked — remove it */
 .recharts-wrapper:focus,
 .recharts-wrapper :focus,

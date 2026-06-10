@@ -11,6 +11,11 @@ const isQuickPanel = getCurrentWebviewWindow().label === "quick";
 
 if (isQuickPanel) {
   document.documentElement.classList.add("quick-panel");
+  // The quick window is only transparent on macOS (see setup_tray); on
+  // Windows/Linux it is opaque, so the page must paint its own background.
+  if (!navigator.userAgent.includes("Mac")) {
+    document.documentElement.classList.add("quick-panel-opaque");
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

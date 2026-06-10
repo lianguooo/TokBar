@@ -17,7 +17,12 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use crate::cost::CostMode;
 use crate::pricing::PricingMap;
 
+/// macOS menu bar wants a monochrome template icon; Windows/Linux trays
+/// render the icon as-is, so ship the colored app icon there.
+#[cfg(target_os = "macos")]
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-icon.png");
+#[cfg(not(target_os = "macos"))]
+const TRAY_ICON: &[u8] = include_bytes!("../icons/32x32.png");
 
 /// User settings persisted to settings.json in the app data dir.
 #[derive(Clone, Serialize, serde::Deserialize)]
@@ -373,17 +378,21 @@ fn get_session_models(
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    // Hidden frameless popover window, shown under the tray icon on click.
-    WebviewWindowBuilder::new(app, "quick", WebviewUrl::App("index.html".into()))
+    // Hidden frameless popover window, shown next to the tray icon on click.
+    let quick = WebviewWindowBuilder::new(app, "quick", WebviewUrl::App("index.html".into()))
         .title("TokBar")
         .inner_size(360.0, 460.0)
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(false)
-        .transparent(true)
-        .build()?;
+        .visible(false);
+    // Transparent window + self-drawn rounded corners is a macOS look;
+    // WebView2 transparency on Windows composites poorly (artifacts show
+    // through), so the window stays opaque there.
+    #[cfg(target_os = "macos")]
+    let quick = quick.transparent(true);
+    quick.build()?;
 
     let show = MenuItem::with_id(app, "show", "打开 TokBar / Open TokBar", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>)?;
@@ -391,7 +400,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main")
         .icon(tauri::image::Image::from_bytes(TRAY_ICON)?)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -412,7 +421,15 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                     if w.is_visible().unwrap_or(false) {
                         let _ = w.hide();
                     } else {
-                        let _ = w.move_window(Position::TrayBottomCenter);
+                        // macOS menu bar is at the top, so the panel opens
+                        // below the icon; Windows/Linux trays sit at the
+                        // bottom, so it opens above (TrayCenter).
+                        let pos = if cfg!(target_os = "macos") {
+                            Position::TrayBottomCenter
+                        } else {
+                            Position::TrayCenter
+                        };
+                        let _ = w.move_window(pos);
                         let _ = w.show();
                         let _ = w.set_focus();
                     }
