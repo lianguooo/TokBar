@@ -28,6 +28,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "languages": ["SimpChinese", "English"]
+      },
+      "wix": {
+        "language": ["zh-CN", "en-US"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
