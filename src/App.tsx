@@ -40,6 +40,11 @@ const NAV: { id: Page; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
   { id: "settings", labelKey: "nav.settings", icon: Settings },
 ];
 
+// With the macOS overlay title bar (transparent, traffic lights floating
+// over the content) the sidebar header leaves room for the buttons and the
+// top strip doubles as the window drag handle.
+const IS_MAC = navigator.userAgent.includes("Mac");
+
 const RANGES: { id: RangeKey; labelKey: I18nKey }[] = [
   { id: "today", labelKey: "range.today" },
   { id: "7d", labelKey: "range.7d" },
@@ -119,7 +124,13 @@ function App() {
     <div className="flex h-full">
       {/* Sidebar */}
       <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-card/50">
-        <div className="flex items-center gap-2.5 px-5 py-5">
+        <div
+          data-tauri-drag-region
+          className={cn(
+            "flex items-center gap-2.5 px-5 pb-5",
+            IS_MAC ? "pt-11" : "pt-5",
+          )}
+        >
           <Logo size={32} />
           <div>
             <div className="text-sm font-semibold leading-none">TokBar</div>
@@ -149,7 +160,10 @@ function App() {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border px-6 py-3">
+        <header
+          data-tauri-drag-region
+          className="flex items-center justify-between border-b border-border px-6 py-3"
+        >
           <h1 className="text-base font-semibold">
             {t(NAV.find((n) => n.id === page)!.labelKey)}
           </h1>
