@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   BarChart3,
   Bot,
+  Check,
   LayoutDashboard,
   ListTree,
   RefreshCw,
@@ -60,12 +61,25 @@ function App() {
     total: number;
   } | null>(null);
 
-  const refresh = useCallback(async () => {
+  const [justRefreshed, setJustRefreshed] = useState<ScanStats | null>(null);
+
+  // `feedback` is true only for the manual button: the file watcher keeps
+  // data current, so a manual scan usually finds nothing and finishes in
+  // milliseconds — without a minimum spin and a result label the click
+  // looks like a no-op.
+  const refresh = useCallback(async (feedback = false) => {
     setScanning(true);
     try {
-      const stats = await api.refreshData();
+      const [stats] = await Promise.all([
+        api.refreshData(),
+        feedback ? new Promise((r) => setTimeout(r, 500)) : null,
+      ]);
       setLastScan(stats);
       setRefreshKey((k) => k + 1);
+      if (feedback) {
+        setJustRefreshed(stats);
+        setTimeout(() => setJustRefreshed(null), 2500);
+      }
     } catch (e) {
       console.error("refresh failed:", e);
     } finally {
@@ -161,12 +175,16 @@ function App() {
             <Button
               variant="outline"
               size="sm"
-              onClick={refresh}
+              onClick={() => refresh(true)}
               disabled={scanning}
             >
-              <RefreshCw
-                className={cn("h-3.5 w-3.5", scanning && "animate-spin")}
-              />
+              {justRefreshed && !scanning ? (
+                <Check className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <RefreshCw
+                  className={cn("h-3.5 w-3.5", scanning && "animate-spin")}
+                />
+              )}
               {scanProgress
                 ? t("app.scanProgress", {
                     done: scanProgress.done,
@@ -174,7 +192,11 @@ function App() {
                   })
                 : scanning
                   ? t("app.scanning")
-                  : t("app.refresh")}
+                  : justRefreshed
+                    ? justRefreshed.entriesInserted > 0
+                      ? t("app.refreshed", { n: justRefreshed.entriesInserted })
+                      : t("app.upToDate")
+                    : t("app.refresh")}
             </Button>
           </div>
         </header>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Flame, LayoutDashboard, RefreshCw } from "lucide-react";
+import { Check, Flame, LayoutDashboard, RefreshCw } from "lucide-react";
 import { api, type Block } from "@/lib/api";
 import { formatCost, formatNumber, formatTime, formatTokens } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
@@ -33,6 +33,7 @@ export function QuickPanel() {
   const { t } = useI18n();
   const [stats, setStats] = useState<QuickStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [justRefreshed, setJustRefreshed] = useState(false);
 
   const load = useCallback(async () => {
     const [today, month, blocks] = await Promise.all([
@@ -49,11 +50,19 @@ export function QuickPanel() {
     });
   }, []);
 
+  // Minimum spin + a brief check mark: the file watcher keeps data
+  // current, so the scan usually finishes in milliseconds and the click
+  // would otherwise look like a no-op.
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await api.refreshData();
+      await Promise.all([
+        api.refreshData(),
+        new Promise((r) => setTimeout(r, 500)),
+      ]);
       await load();
+      setJustRefreshed(true);
+      setTimeout(() => setJustRefreshed(false), 1800);
     } finally {
       setRefreshing(false);
     }
@@ -88,7 +97,11 @@ export function QuickPanel() {
           className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           title={t("app.refresh")}
         >
-          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+          {justRefreshed && !refreshing ? (
+            <Check className="h-3.5 w-3.5 text-primary" />
+          ) : (
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+          )}
         </button>
       </div>
 
