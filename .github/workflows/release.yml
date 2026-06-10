@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'TokBar __VERSION__'
+          releaseBody: |
+            下载说明:
+            - macOS (Apple Silicon): `*_aarch64.dmg`
+            - macOS (Intel): `*_x64.dmg`
+            - Windows: `*_x64-setup.exe` 或 `*.msi`
+
+            注意: 当前安装包未签名。macOS 首次打开如提示"已损坏",请执行
+            `xattr -cr /Applications/TokBar.app`;Windows 出现 SmartScreen
+            提示时点击"更多信息 → 仍要运行"。
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

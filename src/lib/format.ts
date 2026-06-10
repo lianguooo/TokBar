@@ -1,0 +1,80 @@
+export function formatCost(value: number): string {
+  if (value >= 1000) {
+    return `$${(value / 1000).toFixed(2)}k`;
+  }
+  if (value >= 1) {
+    return `$${value.toFixed(2)}`;
+  }
+  return `$${value.toFixed(4)}`;
+}
+
+export function formatTokens(value: number): string {
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+  return String(value);
+}
+
+export function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
+export function formatDateTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** "claude-opus-4-20250101" -> "opus-4" style short model names (ccusage-like). */
+export function shortModelName(model: string): string {
+  let name = model.replace(/^anthropic\//, "").replace(/^claude-/, "");
+  const parts = name.split("-");
+  if (parts.length > 1 && /^\d{8}$/.test(parts[parts.length - 1])) {
+    parts.pop();
+    name = parts.join("-");
+  }
+  return name;
+}
+
+export const AGENT_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex CLI",
+  kimi: "Kimi CLI",
+};
+
+// Chart colors reference theme variables so every chart re-colors with the
+// accent chosen in Settings (SVG fill/stroke accept var()).
+export const AGENT_COLORS: Record<string, string> = {
+  "claude-code": "var(--chart-1)",
+  codex: "var(--chart-2)",
+  kimi: "var(--chart-3)",
+};
+
+export const CHART_PALETTE = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "#94a3b8",
+  "#64748b",
+  "#475569",
+];
+
+export function agentLabel(agent: string): string {
+  return AGENT_LABELS[agent] ?? agent;
+}
+
+export function agentColor(agent: string, index = 0): string {
+  return AGENT_COLORS[agent] ?? CHART_PALETTE[index % CHART_PALETTE.length];
+}
