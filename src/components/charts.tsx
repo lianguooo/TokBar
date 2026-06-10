@@ -247,11 +247,25 @@ export function DistributionPie({
   data: PieDatum[];
   valueFormatter: (v: number) => string;
 }) {
+  // Colors are keyed off the caller's (unsorted) order so the same name
+  // gets the same color in every pie on the page; slices and the legend
+  // are then drawn largest-first. The legend payload is explicit because
+  // recharts does not follow the sorted data order on its own.
+  const { sorted, colorOf } = useMemo(() => {
+    const colors = new Map<string, string>();
+    data.forEach((d, i) =>
+      colors.set(d.name, d.color ?? CHART_PALETTE[i % CHART_PALETTE.length]),
+    );
+    return {
+      sorted: [...data].sort((a, b) => b.value - a.value),
+      colorOf: (name: string) => colors.get(name) ?? CHART_PALETTE[0],
+    };
+  }, [data]);
   return (
     <ResponsiveContainer width="100%" height={260}>
       <PieChart>
         <Pie
-          data={data}
+          data={sorted}
           dataKey="value"
           nameKey="name"
           innerRadius={55}
@@ -259,8 +273,8 @@ export function DistributionPie({
           paddingAngle={2}
           strokeWidth={0}
         >
-          {data.map((d, i) => (
-            <Cell key={d.name} fill={d.color ?? CHART_PALETTE[i % CHART_PALETTE.length]} />
+          {sorted.map((d) => (
+            <Cell key={d.name} fill={colorOf(d.name)} />
           ))}
         </Pie>
         <Tooltip
@@ -272,6 +286,33 @@ export function DistributionPie({
           align="right"
           verticalAlign="middle"
           wrapperStyle={{ fontSize: 12 }}
+          content={() => (
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {sorted.map((d) => (
+                <li
+                  key={d.name}
+                  style={{
+                    color: colorOf(d.name),
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 4,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 2,
+                      flexShrink: 0,
+                      background: colorOf(d.name),
+                    }}
+                  />
+                  {d.name}
+                </li>
+              ))}
+            </ul>
+          )}
         />
       </PieChart>
     </ResponsiveContainer>
