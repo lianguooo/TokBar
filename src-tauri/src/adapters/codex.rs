@@ -47,18 +47,45 @@ struct RawTokenUsage {
     total_tokens: u64,
 }
 
-/// Codex usage dirs: $CODEX_HOME (or ~/.codex) `sessions/` plus
-/// `archived_sessions/` (ccusage scans both).
+/// Codex usage dirs: `sessions/` plus `archived_sessions/` (ccusage
+/// scans both) under every Codex home.
+///
+/// Homes come from $CODEX_HOME (comma-separated, ccusage parity) when
+/// set. Otherwise ~/.codex plus any sibling `~/.codex{-_.}*` home that
+/// has a `sessions/` dir — multi-account setups launch the second
+/// Codex with CODEX_HOME pointing at such a clone, and a GUI app never
+/// sees that per-shell variable.
 pub fn data_dirs() -> Vec<PathBuf> {
-    let base = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")));
-    let Some(base) = base else {
-        return Vec::new();
-    };
-    [base.join("sessions"), base.join("archived_sessions")]
-        .into_iter()
+    let mut bases: Vec<PathBuf> = Vec::new();
+    if let Ok(raw) = std::env::var("CODEX_HOME") {
+        for part in raw.split(',') {
+            let part = part.trim();
+            if !part.is_empty() {
+                bases.push(PathBuf::from(part));
+            }
+        }
+    } else if let Some(home) = dirs::home_dir() {
+        bases.push(home.join(".codex"));
+        if let Ok(read) = std::fs::read_dir(&home) {
+            for entry in read.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let is_clone = name
+                    .strip_prefix(".codex")
+                    .is_some_and(|rest| rest.starts_with(['-', '_', '.']));
+                if is_clone && path.join("sessions").is_dir() {
+                    bases.push(path);
+                }
+            }
+        }
+    }
+    bases.sort();
+    bases.dedup();
+    bases
+        .iter()
+        .flat_map(|base| [base.join("sessions"), base.join("archived_sessions")])
         .filter(|p| p.is_dir())
         .collect()
 }
