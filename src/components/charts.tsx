@@ -129,19 +129,46 @@ export function CostTrendChart({ rows }: { rows: DailyRow[] }) {
         <XAxis dataKey="date" tick={AXIS_STYLE} tickFormatter={shortDate} />
         <YAxis tick={AXIS_STYLE} tickFormatter={(v) => formatCost(v)} width={70} />
         <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(v, name) => [formatCost(Number(v ?? 0)), agentLabel(String(name))]}
+          content={({ active, payload, label }) => {
+            // Zero-cost agents are invisible in the stack; hide their
+            // "$0.0000" rows in the tooltip too.
+            const items = (payload ?? []).filter((p) => Number(p.value) > 0);
+            if (!active || items.length === 0) return null;
+            return (
+              <div style={{ ...TOOLTIP_STYLE, padding: "8px 12px" }}>
+                <div style={{ marginBottom: 4 }}>{label}</div>
+                {items.map((p) => (
+                  <div
+                    key={String(p.dataKey)}
+                    style={{
+                      color: agentColor(
+                        String(p.dataKey),
+                        agents.indexOf(String(p.dataKey)),
+                      ),
+                    }}
+                  >
+                    {agentLabel(String(p.dataKey))} : {formatCost(Number(p.value))}
+                  </div>
+                ))}
+              </div>
+            );
+          }}
         />
         <Legend formatter={(v) => agentLabel(String(v))} />
         {agents.map((agent, i) => (
+          // Fill-only stacked bands: an agent's usage is its band
+          // thickness. No per-series stroke or hover dot — a zero-usage
+          // series would otherwise draw its line and dot on top of the
+          // band below it, reading as if it had that band's value.
           <Area
             key={agent}
             type="monotone"
             dataKey={agent}
             stackId="cost"
-            stroke={agentColor(agent, i)}
+            stroke="none"
             fill={agentColor(agent, i)}
-            fillOpacity={0.25}
+            fillOpacity={0.45}
+            activeDot={false}
           />
         ))}
       </AreaChart>
