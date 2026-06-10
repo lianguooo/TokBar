@@ -47,6 +47,14 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS 代码签名(Developer ID Application 证书,base64 编码的 .p12)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS 公证(Apple ID + App 专用密码)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'TokBar __VERSION__'
@@ -56,9 +64,8 @@ jobs:
             - macOS (Intel): `*_x64.dmg`
             - Windows: `*_x64-setup.exe` 或 `*.msi`
 
-            注意: 当前安装包未签名。macOS 首次打开如提示"已损坏",请执行
-            `xattr -cr /Applications/TokBar.app`;Windows 出现 SmartScreen
-            提示时点击"更多信息 → 仍要运行"。
+            macOS 安装包已签名并经过 Apple 公证,可直接打开。
+            Windows 出现 SmartScreen 提示时点击"更多信息 → 仍要运行"。
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
