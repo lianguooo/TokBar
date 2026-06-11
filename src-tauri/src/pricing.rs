@@ -106,38 +106,54 @@ pub struct PricingMap {
     entries: HashMap<String, ModelPricing>,
 }
 
-/// Built-in prices for models newer than the LiteLLM database (official
-/// Anthropic pricing; cache write = 1.25x input, cache read = 0.1x input).
-/// Used only when neither the snapshot nor the online refresh has the model.
+/// Builds a builtin entry from per-token rates; `None` cache rates fall
+/// back to the ccusage defaults (write 1.25x input, read 0.1x input).
+const fn rates(
+    input: f64,
+    output: f64,
+    cache_create: Option<f64>,
+    cache_read: Option<f64>,
+) -> ModelPricing {
+    ModelPricing {
+        input_cost_per_token: Some(input),
+        output_cost_per_token: Some(output),
+        cache_creation_input_token_cost: cache_create,
+        cache_read_input_token_cost: cache_read,
+        input_cost_per_token_above_200k_tokens: None,
+        output_cost_per_token_above_200k_tokens: None,
+        cache_creation_input_token_cost_above_200k_tokens: None,
+        cache_read_input_token_cost_above_200k_tokens: None,
+    }
+}
+
+/// Built-in prices for models newer than the LiteLLM database, at official
+/// vendor list prices. Used only when neither the snapshot nor the online
+/// refresh has the model, so LiteLLM wins once it catches up.
+///
+/// The third-party names below are what Claude Code logs when a provider
+/// switcher (cc-switch etc.) points ANTHROPIC_BASE_URL at Kimi / DeepSeek /
+/// GLM / MiniMax / StepFun / LongCat — the JSONL `message.model` carries
+/// the real model name, so pricing them here is all that's needed.
 const BUILTIN_PRICING: &[(&str, ModelPricing)] = &[
-    (
-        "claude-fable-5",
-        ModelPricing {
-            input_cost_per_token: Some(0.00001),  // $10 / 1M
-            output_cost_per_token: Some(0.00005), // $50 / 1M
-            cache_creation_input_token_cost: Some(0.0000125),
-            cache_read_input_token_cost: Some(0.000001),
-            input_cost_per_token_above_200k_tokens: None,
-            output_cost_per_token_above_200k_tokens: None,
-            cache_creation_input_token_cost_above_200k_tokens: None,
-            cache_read_input_token_cost_above_200k_tokens: None,
-        },
-    ),
-    // Kimi for-coding plan, current (k2.6) rates — ccusage maps this model
-    // to moonshot/kimi-k2.6. https://platform.kimi.ai/docs/pricing/chat-k26
-    (
-        "kimi-for-coding",
-        ModelPricing {
-            input_cost_per_token: Some(0.00000095),
-            output_cost_per_token: Some(0.000004),
-            cache_creation_input_token_cost: Some(0.0000011875),
-            cache_read_input_token_cost: Some(0.00000016),
-            input_cost_per_token_above_200k_tokens: None,
-            output_cost_per_token_above_200k_tokens: None,
-            cache_creation_input_token_cost_above_200k_tokens: None,
-            cache_read_input_token_cost_above_200k_tokens: None,
-        },
-    ),
+    // Official Anthropic pricing.
+    ("claude-fable-5", rates(1e-5, 5e-5, Some(1.25e-5), Some(1e-6))),
+    // Kimi for-coding plan = k2.6 rates, ccusage parity.
+    // https://platform.kimi.ai/docs/pricing/chat-k26
+    ("kimi-for-coding", rates(9.5e-7, 4e-6, Some(1.1875e-6), Some(1.6e-7))),
+    ("kimi-k2.6", rates(9.5e-7, 4e-6, Some(1.1875e-6), Some(1.6e-7))),
+    // Z.ai GLM-5.1 list price ($1.40 / $4.40 per 1M).
+    ("glm-5.1", rates(1.4e-6, 4.4e-6, None, None)),
+    // DeepSeek V4 (api-docs.deepseek.com/quick_start/pricing); cache
+    // writes carry no surcharge, so write = input rate.
+    ("deepseek-v4-pro", rates(4.35e-7, 8.7e-7, Some(4.35e-7), Some(3.625e-9))),
+    ("deepseek-v4-flash", rates(1.4e-7, 2.8e-7, Some(1.4e-7), Some(2.8e-9))),
+    // MiniMax M2.7 list price ($0.30 / $1.20, cache read $0.059 per 1M).
+    ("MiniMax-M2.7", rates(3e-7, 1.2e-6, None, Some(5.9e-8))),
+    // StepFun Step-3.5-Flash ($0.10 / $0.30, cache read $0.02 per 1M);
+    // also matches dated variants like step-3.5-flash-2603.
+    ("step-3.5-flash", rates(1e-7, 3e-7, None, Some(2e-8))),
+    // Meituan LongCat hosted list price ($0.20 / $0.80 per 1M).
+    ("LongCat-Flash-Chat", rates(2e-7, 8e-7, None, None)),
 ];
 
 impl PricingMap {
@@ -244,7 +260,8 @@ fn is_relevant_model(key: &str) -> bool {
     let k = key.to_ascii_lowercase();
     [
         "claude", "gpt", "o1", "o3", "o4", "codex", "gemini", "chatgpt", "kimi", "moonshot",
-        "minimax", "glm", "qwen", "deepseek",
+        "minimax", "glm", "qwen", "deepseek", "step", "longcat", "meituan", "z-ai", "zai",
+        "zhipu",
     ]
     .iter()
     .any(|p| {

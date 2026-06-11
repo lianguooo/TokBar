@@ -78,3 +78,34 @@ fn pricing_matches_claude_models() {
         );
     }
 }
+
+/// Model names that cc-switch & co. configure when pointing Claude Code at
+/// third-party providers — they land verbatim in `message.model`, so each
+/// must resolve to a non-zero price (vendor list rates in BUILTIN_PRICING).
+#[test]
+fn pricing_covers_provider_switcher_models() {
+    let pricing = PricingMap::load(None);
+    // (logged model name, expected input $/token)
+    let cases = [
+        ("kimi-k2.6", 9.5e-7),
+        ("glm-5.1", 1.4e-6),
+        ("deepseek-v4-pro", 4.35e-7),
+        ("deepseek-v4-flash", 1.4e-7),
+        ("MiniMax-M2.7", 3e-7),
+        ("Pro/MiniMaxAI/MiniMax-M2.7", 3e-7),
+        ("step-3.5-flash-2603", 1e-7),
+        ("LongCat-Flash-Chat", 2e-7),
+    ];
+    for (model, want_input) in cases {
+        let p = pricing
+            .resolve(model)
+            .unwrap_or_else(|| panic!("{model} not priced"));
+        assert!(
+            (p.input() - want_input).abs() < 1e-12,
+            "{model}: input {} != {}",
+            p.input(),
+            want_input
+        );
+        assert!(p.output() > 0.0, "{model}: zero output rate");
+    }
+}
