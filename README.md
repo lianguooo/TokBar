@@ -131,6 +131,7 @@ Data flow: on launch (and every 60s) incrementally scan log directories → pars
 
 - [ccusage](https://github.com/ryoppippi/ccusage): TokBar's parsing and billing logic is ported from this project
 - [Tauri](https://tauri.app) · [LiteLLM](https://github.com/BerriAI/litellm) (pricing data) · [Recharts](https://recharts.org)
+- Special thanks to the [LinuxDO](https://linux.do/) community for their recognition and support.
 
 ## License
 

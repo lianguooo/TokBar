@@ -131,6 +131,7 @@ src/
 
 - [ccusage](https://github.com/ryoppippi/ccusage)：TokBar 的解析与计费逻辑移植自该项目
 - [Tauri](https://tauri.app) · [LiteLLM](https://github.com/BerriAI/litellm)（定价数据）· [Recharts](https://recharts.org)
+- 特别感谢 [LinuxDO](https://linux.do/) 社区的认可与支持。
 
 ## 许可证
 
