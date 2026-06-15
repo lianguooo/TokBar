@@ -1,6 +1,6 @@
 [package]
 name = "tokbar"
-version = "0.2.2"
+version = "0.2.3"
 description = "TokBar - AI Usage Dashboard"
 authors = ["TokBar"]
 edition = "2021"
