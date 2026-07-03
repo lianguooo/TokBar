@@ -2,10 +2,13 @@ export function formatCost(value: number): string {
   if (value >= 1000) {
     return `$${(value / 1000).toFixed(2)}k`;
   }
-  if (value >= 1) {
-    return `$${value.toFixed(2)}`;
+  // Sub-cent values keep 4 decimals so tiny per-request prices stay
+  // visible; everything else uses the conventional 2, so table columns
+  // and axis ticks don't mix "$0.3001" with "$8.55".
+  if (value > 0 && value < 0.01) {
+    return `$${value.toFixed(4)}`;
   }
-  return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
 }
 
 export function formatTokens(value: number): string {
