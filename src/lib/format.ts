@@ -22,8 +22,21 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
+/** Date/time rendering follows the in-app language toggle, not the OS
+ *  locale — mirrors detectLang() in i18n.tsx (kept dependency-free). */
+function uiLocale(): string {
+  const saved = localStorage.getItem("tokbar-lang");
+  const lang =
+    saved === "zh" || saved === "en"
+      ? saved
+      : navigator.language.toLowerCase().startsWith("zh")
+        ? "zh"
+        : "en";
+  return lang === "zh" ? "zh-CN" : "en-US";
+}
+
 export function formatDateTime(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  return new Date(ms).toLocaleString(uiLocale(), {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -32,7 +45,7 @@ export function formatDateTime(ms: number): string {
 }
 
 export function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, {
+  return new Date(ms).toLocaleTimeString(uiLocale(), {
     hour: "2-digit",
     minute: "2-digit",
   });
