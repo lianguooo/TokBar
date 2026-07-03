@@ -26,6 +26,32 @@ html.light {
   --accent: oklch(0.94 0.003 285);
 }
 
+/* macOS material layering: the window itself is transparent and an
+   NSVisualEffectView (sidebar material, set in tauri.macos.conf.json)
+   blurs the desktop behind it. The webview then paints translucent
+   washes on top: the sidebar column stays clear (strongest frost), the
+   content column gets a ~82% wash so charts and tables stay legible,
+   and cards/hovers/borders become alpha layers instead of solid steps.
+   Windows/Linux never get the .mac class and keep the solid palette. */
+html.mac {
+  --background: oklch(0.17 0.005 285 / 0.55);
+  --card: oklch(0.3 0.012 285 / 0.4);
+  --muted: oklch(1 0 0 / 0.1);
+  --accent: oklch(1 0 0 / 0.09);
+  --border: oklch(1 0 0 / 0.12);
+}
+html.mac.light {
+  --background: oklch(0.975 0.002 285 / 0.55);
+  --card: oklch(1 0 0 / 0.5);
+  --muted: oklch(0.3 0.01 285 / 0.1);
+  --accent: oklch(0.3 0.01 285 / 0.08);
+  --border: oklch(0 0 0 / 0.09);
+}
+html.mac,
+html.mac body {
+  background: transparent;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
