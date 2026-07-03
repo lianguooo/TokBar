@@ -44,6 +44,11 @@ const en = {
   "overview.topProjects": "Top Projects",
   "overview.projectStats": "{cost} · {tokens} tok · {sessions} sessions",
   "common.empty": "No usage data in this period",
+  "common.loadFailed": "Failed to load data",
+  "common.retry": "Retry",
+  "unit.perMin": "/min",
+  "unit.perHour": "/h",
+  "unit.tok": "tok",
 
   // Table heads
   "th.date": "Date",
@@ -116,6 +121,7 @@ const en = {
   "settings.tray.off": "Icon only",
   "settings.dataSources": "Data Sources",
   "settings.notDetected": "Not detected on this machine",
+  "settings.sources.inactive": "Not detected ({n})",
   "settings.files": "{n} files",
   "settings.lastScan":
     "Last scan: {parsed} of {total} files re-parsed, {entries} entries updated in {ms} ms.",
@@ -143,6 +149,36 @@ const en = {
   "quick.costRate": "Cost rate",
   "quick.blockEnds": "Block ends",
   "quick.openDashboard": "Open Dashboard",
+
+  // Subscription ROI (Overview)
+  "roi.title": "Subscription ROI",
+  "roi.subtitle": "This month · at API prices",
+  "roi.apiValue": "API-priced value",
+  "roi.youPay": "you pay",
+  "roi.saved": "Saved {amount}",
+  "roi.notRecouped": "{amount} to break even",
+  "roi.multiple": "{x}× back",
+  "roi.noUsage": "no usage",
+  "roi.untitled": "Untitled",
+  "roi.hint":
+    "When plans share an agent, its usage is split across them by fee — never double-counted. Real savings are usually higher, since plans also cover usage TokBar can't see.",
+
+  // Settings — subscriptions
+  "settings.subscriptions": "Subscriptions",
+  "settings.subscriptionsDesc":
+    "Track flat-rate plans (Claude Max, ChatGPT Pro…). TokBar prices the agents they cover at API rates and shows your real ROI on the Overview.",
+  "settings.sub.namePlaceholder": "Plan name",
+  "settings.sub.agent": "Covers",
+  "settings.sub.pickAgents": "Pick agents",
+  "settings.sub.addAgent": "Add",
+  "settings.sub.perMonth": "/mo",
+  "settings.sub.quickAdd": "Quick add",
+  "settings.sub.custom": "Custom",
+  "settings.sub.add": "Add subscription",
+  "settings.sub.remove": "Remove",
+  "settings.sub.confirmRemove": "Confirm delete",
+  "settings.sub.empty":
+    "No subscriptions yet — pick one below to see your ROI on the Overview.",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -178,6 +214,11 @@ const zh: Record<keyof typeof en, string> = {
   "overview.topProjects": "项目排行",
   "overview.projectStats": "{cost} · {tokens} tok · {sessions} 个会话",
   "common.empty": "该时间段内暂无使用数据",
+  "common.loadFailed": "数据加载失败",
+  "common.retry": "重试",
+  "unit.perMin": "/分钟",
+  "unit.perHour": "/小时",
+  "unit.tok": "tok",
 
   "th.date": "日期",
   "th.time": "时间段",
@@ -243,6 +284,7 @@ const zh: Record<keyof typeof en, string> = {
   "settings.tray.off": "仅图标",
   "settings.dataSources": "数据源",
   "settings.notDetected": "本机未检测到",
+  "settings.sources.inactive": "未检测到 ({n})",
   "settings.files": "{n} 个文件",
   "settings.lastScan":
     "上次扫描:重新解析 {parsed}/{total} 个文件,更新 {entries} 条记录,耗时 {ms} 毫秒。",
@@ -268,6 +310,35 @@ const zh: Record<keyof typeof en, string> = {
   "quick.costRate": "成本速率",
   "quick.blockEnds": "块结束于",
   "quick.openDashboard": "打开主面板",
+
+  // 订阅回本(总览)
+  "roi.title": "订阅回本",
+  "roi.subtitle": "本月 · 按 API 价",
+  "roi.apiValue": "按 API 计价",
+  "roi.youPay": "实付",
+  "roi.saved": "省了 {amount}",
+  "roi.notRecouped": "还差 {amount} 回本",
+  "roi.multiple": "{x}× 回本",
+  "roi.noUsage": "暂无用量",
+  "roi.untitled": "未命名",
+  "roi.hint":
+    "多个套餐覆盖同一 agent 时,其用量按月费占比分摊,不会重复计价。实际节省通常更多 —— 套餐还覆盖了 TokBar 看不到的用量。",
+
+  // 设置 — 订阅
+  "settings.subscriptions": "订阅",
+  "settings.subscriptionsDesc":
+    "记录你的固定月费套餐(Claude Max、ChatGPT Pro…)。TokBar 会按 API 价给它们覆盖的 agent 计价,在总览展示你真实的回本情况。",
+  "settings.sub.namePlaceholder": "套餐名称",
+  "settings.sub.agent": "覆盖",
+  "settings.sub.pickAgents": "选择 Agent",
+  "settings.sub.addAgent": "添加",
+  "settings.sub.perMonth": "/月",
+  "settings.sub.quickAdd": "快速添加",
+  "settings.sub.custom": "自定义",
+  "settings.sub.add": "添加订阅",
+  "settings.sub.remove": "删除",
+  "settings.sub.confirmRemove": "确认删除",
+  "settings.sub.empty": "还没有订阅 —— 在下方选一个即可在总览看到回本情况。",
 };
 
 const dicts = { en, zh };

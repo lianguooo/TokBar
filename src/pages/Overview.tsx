@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Bot,
@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  type AgentBreakdown,
   type DailyRow,
   type ModelRow,
   type Overview as OverviewData,
@@ -24,10 +25,21 @@ import {
   shortModelName,
 } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { useSubscriptions } from "@/lib/subscriptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadError } from "@/components/LoadError";
 import { StatCard } from "@/components/StatCard";
+import { RoiCard } from "@/components/RoiCard";
 import { CostTrendChart, DistributionPie } from "@/components/charts";
+
+/** Start of the current calendar month (local time). */
+function startOfMonth(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(1);
+  return d.getTime();
+}
 
 export function OverviewPage({
   params,
@@ -39,15 +51,35 @@ export function OverviewPage({
   hourly: boolean;
 }) {
   const { t } = useI18n();
+  const { subscriptions } = useSubscriptions();
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [daily, setDaily] = useState<DailyRow[]>([]);
   const [models, setModels] = useState<ModelRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [monthByAgent, setMonthByAgent] = useState<AgentBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  // ROI always reflects this calendar month at API prices, independent of
+  // the page's range/cost-mode selector. Only fetched when there are
+  // subscriptions to price against.
+  useEffect(() => {
+    if (subscriptions.length === 0) return;
+    let cancelled = false;
+    api
+      .getOverview({ sinceMs: startOfMonth(), costMode: "calculate" })
+      .then((o) => !cancelled && setMonthByAgent(o.byAgent))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [subscriptions, refreshKey]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(false);
     Promise.all([
       api.getOverview(params),
       hourly ? api.getHourly(params) : api.getDaily(params),
@@ -61,12 +93,36 @@ export function OverviewPage({
         setModels(m);
         setProjects(p);
       })
+      .catch(() => !cancelled && setError(true))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, hourly]);
+  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, hourly, attempt]);
 
+  // Stable references so DistributionPie's internal memo isn't defeated
+  // by a fresh array on every unrelated re-render.
+  const modelPie = useMemo(
+    () =>
+      models.slice(0, 6).map((m) => ({
+        name: shortModelName(m.model),
+        value: m.cost,
+      })),
+    [models],
+  );
+  const agentPie = useMemo(
+    () =>
+      (overview?.byAgent ?? []).map((a, i) => ({
+        name: agentLabel(a.agent),
+        value: a.cost,
+        color: agentColor(a.agent, i),
+      })),
+    [overview],
+  );
+
+  if (error && !overview) {
+    return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
+  }
   if (loading && !overview) {
     return (
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -78,18 +134,11 @@ export function OverviewPage({
   }
 
   const tot = overview?.totals;
-  const modelPie = models.slice(0, 6).map((m) => ({
-    name: shortModelName(m.model),
-    value: m.cost,
-  }));
-  const agentPie = (overview?.byAgent ?? []).map((a, i) => ({
-    name: agentLabel(a.agent),
-    value: a.cost,
-    color: agentColor(a.agent, i),
-  }));
 
   return (
     <div className="space-y-4">
+      <RoiCard monthByAgent={monthByAgent} />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           title={t("overview.totalCost")}
