@@ -77,7 +77,7 @@ export function BlocksPage({
                   {formatDateTime(b.startMs)} – {formatTime(b.endMs)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {b.isActive ? t("blocks.active") : t("blocks.completed")}
+                  {b.isActive ? remainingLabel(b.endMs, t) : t("blocks.completed")}
                 </div>
               </div>
             </div>
@@ -109,6 +109,20 @@ export function BlocksPage({
       ))}
     </div>
   );
+}
+
+/** "还剩 2 小时 5 分" — the live badge already says "active", so the
+ *  subtitle carries the genuinely useful fact: time left in the window. */
+function remainingLabel(
+  endMs: number,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  const mins = Math.max(0, Math.round((endMs - Date.now()) / 60_000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0
+    ? t("blocks.remainHM", { h, m })
+    : t("blocks.remainM", { m });
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
