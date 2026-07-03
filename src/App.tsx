@@ -6,7 +6,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { onEvent } from "@/lib/api";
 import {
   BarChart3,
   Bot,
@@ -142,17 +142,17 @@ function App() {
     const timer = setInterval(() => {
       if (!document.hidden) refresh();
     }, 300_000);
-    const unlistenUpdate = listen("usage-updated", () => {
+    const unlistenUpdate = onEvent("usage-updated", () => {
       setRefreshKey((k) => k + 1);
     });
-    const unlistenProgress = listen<{ done: number; total: number }>(
+    const unlistenProgress = onEvent<{ done: number; total: number }>(
       "scan-progress",
       (e) => {
         setScanProgress(e.payload.done >= e.payload.total ? null : e.payload);
       },
     );
     // Deep links from the quick panel's stat cards.
-    const unlistenNav = listen<string>("navigate-page", (e) => {
+    const unlistenNav = onEvent<string>("navigate-page", (e) => {
       if (NAV.some((n) => n.id === e.payload)) {
         setPage(e.payload as Page);
       }

@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { IN_TAURI } from "@/lib/api";
 
 export type ThemeMode = "dark" | "light";
 export type AccentKey = "amber" | "blue" | "emerald" | "violet" | "rose";
@@ -67,7 +68,9 @@ function applyTheme(mode: ThemeMode, accent: AccentKey) {
   root.classList.toggle("light", mode === "light");
   // Keep the native window chrome (macOS traffic-light strip, Windows
   // title bar) in the same color world as the page.
-  getCurrentWindow().setTheme(mode).catch(() => {});
+  if (IN_TAURI) {
+    getCurrentWindow().setTheme(mode).catch(() => {});
+  }
   const a = ACCENTS[accent];
   root.style.setProperty("--primary", a.primary);
   root.style.setProperty("--primary-foreground", a.primaryFg);

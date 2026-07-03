@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import {
   ChevronDown,
@@ -13,7 +12,13 @@ import {
   Rocket,
   Trash2,
 } from "lucide-react";
-import { api, type CostMode, type ScanStats, type SourceInfo } from "@/lib/api";
+import {
+  IN_TAURI,
+  api,
+  type CostMode,
+  type ScanStats,
+  type SourceInfo,
+} from "@/lib/api";
 import { agentLabel } from "@/lib/format";
 import { useI18n, type I18nKey, type Lang } from "@/lib/i18n";
 import { useSubscriptions } from "@/lib/subscriptions";
@@ -68,13 +73,15 @@ export function SettingsPage({
 
   useEffect(() => {
     api.getSources().then(setSources);
-    invoke<string>("get_tray_mode").then((m) => setTrayMode(m as TrayMode));
-    isEnabled().then(setAutostart).catch(console.error);
+    api.getTrayMode().then((m) => setTrayMode(m as TrayMode));
+    if (IN_TAURI) {
+      isEnabled().then(setAutostart).catch(console.error);
+    }
   }, []);
 
   const changeTrayMode = (m: TrayMode) => {
     setTrayMode(m);
-    invoke("set_tray_mode", { mode: m }).catch(console.error);
+    api.setTrayMode(m).catch(console.error);
   };
 
   const toggleAutostart = async () => {

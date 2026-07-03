@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit } from "@tauri-apps/api/event";
 import { Check, Flame, LayoutDashboard, RefreshCw } from "lucide-react";
-import { api, type Block } from "@/lib/api";
+import { IN_TAURI, api, onEvent, type Block } from "@/lib/api";
 import { formatCost, formatNumber, formatTime, formatTokens } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -81,7 +80,7 @@ export function QuickPanel() {
     window.addEventListener("focus", load);
     document.addEventListener("visibilitychange", loadIfVisible);
     const timer = setInterval(loadIfVisible, 30_000);
-    const unlisten = listen("usage-updated", loadIfVisible);
+    const unlisten = onEvent("usage-updated", loadIfVisible);
     return () => {
       window.removeEventListener("focus", load);
       document.removeEventListener("visibilitychange", loadIfVisible);
@@ -92,8 +91,10 @@ export function QuickPanel() {
 
   // Deep link: open the main window already switched to the right page.
   const openPage = useCallback(async (page: string) => {
-    await invoke("show_main_window");
-    await emit("navigate-page", page);
+    await api.showMainWindow();
+    if (IN_TAURI) {
+      await emit("navigate-page", page);
+    }
   }, []);
 
   const block = stats?.activeBlock ?? null;
@@ -208,7 +209,7 @@ export function QuickPanel() {
 
       {/* Footer */}
       <button
-        onClick={() => invoke("show_main_window")}
+        onClick={() => api.showMainWindow()}
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
       >
         <LayoutDashboard className="h-4 w-4" />

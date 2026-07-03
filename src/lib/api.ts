@@ -1,4 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  listen,
+  type EventCallback,
+  type UnlistenFn,
+} from "@tauri-apps/api/event";
+
+/** True inside the Tauri app; false in a plain browser (dev preview /
+ *  design QA), where deterministic mock data is served instead. */
+export const IN_TAURI = "__TAURI_INTERNALS__" in window;
+
+const call = <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> =>
+  IN_TAURI
+    ? invoke<T>(cmd, args)
+    : import("./mockApi").then((m) => m.mockInvoke<T>(cmd, args));
+
+/** `listen()` that no-ops in the browser preview. */
+export function onEvent<T>(
+  event: string,
+  handler: EventCallback<T>,
+): Promise<UnlistenFn> {
+  return IN_TAURI ? listen(event, handler) : Promise.resolve(() => {});
+}
 
 export type CostMode = "auto" | "calculate" | "display";
 export type RangeKey = "today" | "7d" | "30d" | "90d" | "all";
@@ -116,19 +138,22 @@ export function rangeToSinceMs(range: RangeKey): number | undefined {
 }
 
 export const api = {
-  refreshData: () => invoke<ScanStats>("refresh_data"),
-  getOverview: (p: QueryParams) => invoke<Overview>("get_overview", { ...p }),
-  getDaily: (p: QueryParams) => invoke<DailyRow[]>("get_daily", { ...p }),
+  refreshData: () => call<ScanStats>("refresh_data"),
+  getOverview: (p: QueryParams) => call<Overview>("get_overview", { ...p }),
+  getDaily: (p: QueryParams) => call<DailyRow[]>("get_daily", { ...p }),
   /** Same row shape as getDaily, bucketed by local hour ("HH:00"). */
-  getHourly: (p: QueryParams) => invoke<DailyRow[]>("get_hourly", { ...p }),
-  getModels: (p: QueryParams) => invoke<ModelRow[]>("get_models", { ...p }),
+  getHourly: (p: QueryParams) => call<DailyRow[]>("get_hourly", { ...p }),
+  getModels: (p: QueryParams) => call<ModelRow[]>("get_models", { ...p }),
   getSessions: (p: QueryParams & { limit?: number }) =>
-    invoke<SessionRow[]>("get_sessions", { ...p }),
+    call<SessionRow[]>("get_sessions", { ...p }),
   getProjects: (p: QueryParams & { limit?: number }) =>
-    invoke<ProjectRow[]>("get_projects", { ...p }),
+    call<ProjectRow[]>("get_projects", { ...p }),
   getBlocks: (p: { sinceMs?: number; costMode?: CostMode }) =>
-    invoke<Block[]>("get_blocks", { ...p }),
-  getSources: () => invoke<SourceInfo[]>("get_sources"),
+    call<Block[]>("get_blocks", { ...p }),
+  getSources: () => call<SourceInfo[]>("get_sources"),
   getSessionModels: (agent: string, sessionId: string, costMode?: CostMode) =>
-    invoke<ModelRow[]>("get_session_models", { agent, sessionId, costMode }),
+    call<ModelRow[]>("get_session_models", { agent, sessionId, costMode }),
+  getTrayMode: () => call<string>("get_tray_mode"),
+  setTrayMode: (mode: string) => call<void>("set_tray_mode", { mode }),
+  showMainWindow: () => call<void>("show_main_window"),
 };
