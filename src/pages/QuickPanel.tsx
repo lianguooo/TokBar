@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { Check, Flame, LayoutDashboard, RefreshCw } from "lucide-react";
 import { api, type Block } from "@/lib/api";
 import { formatCost, formatNumber, formatTime, formatTokens } from "@/lib/format";
@@ -68,19 +68,33 @@ export function QuickPanel() {
     }
   }, [load]);
 
-  // Reload when shown (focus), on live usage updates from the file
-  // watcher, and on a slow poll so the burn rate stays current.
+  // Reload when shown (focus/visibility), on live usage updates from the
+  // file watcher, and on a slow poll so the burn rate stays current. The
+  // panel is hidden ~99% of the time (hide-on-blur, webview stays alive),
+  // so the poll and watcher events are skipped while not visible — the
+  // visibilitychange reload catches up the moment it reopens.
   useEffect(() => {
     load();
+    const loadIfVisible = () => {
+      if (!document.hidden) load();
+    };
     window.addEventListener("focus", load);
-    const timer = setInterval(load, 30_000);
-    const unlisten = listen("usage-updated", load);
+    document.addEventListener("visibilitychange", loadIfVisible);
+    const timer = setInterval(loadIfVisible, 30_000);
+    const unlisten = listen("usage-updated", loadIfVisible);
     return () => {
       window.removeEventListener("focus", load);
+      document.removeEventListener("visibilitychange", loadIfVisible);
       clearInterval(timer);
       unlisten.then((fn) => fn());
     };
   }, [load]);
+
+  // Deep link: open the main window already switched to the right page.
+  const openPage = useCallback(async (page: string) => {
+    await invoke("show_main_window");
+    await emit("navigate-page", page);
+  }, []);
 
   const block = stats?.activeBlock ?? null;
 
@@ -105,32 +119,43 @@ export function QuickPanel() {
         </button>
       </div>
 
-      {/* Today cost */}
-      <div className="rounded-xl bg-card p-4">
+      {/* Today cost — every card deep-links into the matching page */}
+      <button
+        type="button"
+        onClick={() => openPage("overview")}
+        className="w-full rounded-xl bg-card p-4 text-left transition-colors hover:bg-accent/60"
+      >
         <div className="text-xs text-muted-foreground">{t("quick.todayCost")}</div>
         <div className="mt-1 text-3xl font-bold tabular-nums text-primary">
           {stats ? formatCost(stats.todayCost) : "—"}
         </div>
-      </div>
+      </button>
 
       {/* Stats grid */}
       <div className="mt-3 grid grid-cols-3 gap-2">
         <MiniStat
           label={t("quick.todayTokens")}
           value={stats ? formatTokens(stats.todayTokens) : "—"}
+          onClick={() => openPage("models")}
         />
         <MiniStat
           label={t("quick.todayRequests")}
           value={stats ? formatNumber(stats.todayRequests) : "—"}
+          onClick={() => openPage("sessions")}
         />
         <MiniStat
           label={t("quick.monthCost")}
           value={stats ? formatCost(stats.monthCost) : "—"}
+          onClick={() => openPage("trends")}
         />
       </div>
 
       {/* Active block */}
-      <div className="mt-3 flex-1 rounded-xl bg-card p-4">
+      <button
+        type="button"
+        onClick={() => openPage("blocks")}
+        className="mt-3 w-full flex-1 rounded-xl bg-card p-4 text-left transition-colors hover:bg-accent/60"
+      >
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Flame
             className={cn("h-3.5 w-3.5", block ? "text-primary" : "")}
@@ -144,7 +169,7 @@ export function QuickPanel() {
                 {formatCost(block.cost)}
               </span>
               <span className="text-xs text-muted-foreground">
-                {formatTokens(block.totalTokens)} tok
+                {formatTokens(block.totalTokens)} {t("unit.tok")}
               </span>
             </div>
             <div className="space-y-1 text-xs text-muted-foreground">
@@ -152,7 +177,8 @@ export function QuickPanel() {
                 <div className="flex justify-between">
                   <span>{t("quick.burnRate")}</span>
                   <span className="tabular-nums text-foreground">
-                    {formatTokens(Math.round(block.burnRateTpm))}/min
+                    {formatTokens(Math.round(block.burnRateTpm))}
+                    {t("unit.perMin")}
                   </span>
                 </div>
               )}
@@ -160,7 +186,8 @@ export function QuickPanel() {
                 <div className="flex justify-between">
                   <span>{t("quick.costRate")}</span>
                   <span className="tabular-nums text-foreground">
-                    {formatCost(block.burnRateCostPerHour)}/h
+                    {formatCost(block.burnRateCostPerHour)}
+                    {t("unit.perHour")}
                   </span>
                 </div>
               )}
@@ -177,7 +204,7 @@ export function QuickPanel() {
             {t("quick.noActiveBlock")}
           </div>
         )}
-      </div>
+      </button>
 
       {/* Footer */}
       <button
@@ -191,13 +218,25 @@ export function QuickPanel() {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function MiniStat({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  onClick: () => void;
+}) {
   return (
-    <div className="rounded-xl bg-card p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      className="min-w-0 rounded-xl bg-card p-3 text-left transition-colors hover:bg-accent/60"
+    >
       <div className="truncate text-[10px] text-muted-foreground">{label}</div>
       <div className="mt-0.5 truncate text-sm font-semibold tabular-nums">
         {value}
       </div>
-    </div>
+    </button>
   );
 }

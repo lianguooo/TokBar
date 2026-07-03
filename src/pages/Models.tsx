@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DistributionPie } from "@/components/charts";
+import { LoadError } from "@/components/LoadError";
 import { useI18n } from "@/lib/i18n";
 
 export function ModelsPage({
@@ -28,15 +29,24 @@ export function ModelsPage({
 }) {
   const { t } = useI18n();
   const [models, setModels] = useState<ModelRow[] | null>(null);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    api.getModels(params).then((m) => !cancelled && setModels(m));
+    setError(false);
+    api
+      .getModels(params)
+      .then((m) => !cancelled && setModels(m))
+      .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
     };
-  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey]);
+  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, attempt]);
 
+  if (error) {
+    return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
+  }
   if (!models) {
     return <Skeleton className="h-80" />;
   }
@@ -90,7 +100,11 @@ export function ModelsPage({
             <TableBody>
               {models.map((m) => (
                 <TableRow key={m.model}>
-                  <TableCell className="font-medium">{m.model}</TableCell>
+                  <TableCell className="font-medium">
+                    <span className="block max-w-64 truncate" title={m.model}>
+                      {m.model}
+                    </span>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatTokens(m.inputTokens)}
                   </TableCell>

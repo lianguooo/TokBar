@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadError } from "@/components/LoadError";
 import { CostTrendChart, TokenTrendChart } from "@/components/charts";
 
 type Granularity = "day" | "week" | "month";
@@ -62,22 +63,30 @@ export function TrendsPage({
 }) {
   const { t } = useI18n();
   const [rawDaily, setRawDaily] = useState<DailyRow[] | null>(null);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [granularity, setGranularity] = useState<Granularity>("day");
 
   useEffect(() => {
     let cancelled = false;
+    setError(false);
     const fetch = hourly ? api.getHourly : api.getDaily;
-    fetch(params).then((d) => !cancelled && setRawDaily(d));
+    fetch(params)
+      .then((d) => !cancelled && setRawDaily(d))
+      .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
     };
-  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, hourly]);
+  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, hourly, attempt]);
 
   const daily = useMemo(
     () => (rawDaily && !hourly ? rebucket(rawDaily, granularity) : rawDaily),
     [rawDaily, granularity, hourly],
   );
 
+  if (error) {
+    return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
+  }
   if (!daily) {
     return <Skeleton className="h-80" />;
   }

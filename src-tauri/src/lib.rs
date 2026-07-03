@@ -12,6 +12,10 @@ use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::utils::config::WindowEffectsConfig;
+#[cfg(target_os = "macos")]
+use tauri::utils::{WindowEffect, WindowEffectState};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::cost::CostMode;
@@ -45,6 +49,9 @@ struct AppState {
     pricing: Mutex<PricingMap>,
     cache_dir: PathBuf,
     settings: Mutex<Settings>,
+    /// Serializes whole scans (manual refresh vs. file watcher) while
+    /// leaving `conn` free for readers during the slow parse phase.
+    scan_lock: Mutex<()>,
 }
 
 fn settings_path(cache_dir: &PathBuf) -> PathBuf {
@@ -87,10 +94,10 @@ fn refresh_data(
     state: tauri::State<AppState>,
 ) -> Result<db::ScanStats, String> {
     let stats = {
+        let _scan_guard = state.scan_lock.lock().map_err(|e| e.to_string())?;
         let pricing = state.pricing.lock().map_err(|e| e.to_string())?;
-        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
         let progress_app = app.clone();
-        db::scan_all(&mut conn, &pricing, move |done, total| {
+        db::scan_all(&state.conn, &pricing, move |done, total| {
             let _ = progress_app.emit("scan-progress", serde_json::json!({
                 "done": done, "total": total
             }));
@@ -203,10 +210,10 @@ fn spawn_usage_watcher(handle: tauri::AppHandle) {
 fn scan_and_broadcast(handle: &tauri::AppHandle) {
     let state: tauri::State<AppState> = handle.state();
     {
+        let Ok(_scan_guard) = state.scan_lock.lock() else { return };
         let Ok(pricing) = state.pricing.lock() else { return };
-        let Ok(mut conn) = state.conn.lock() else { return };
         let progress_app = handle.clone();
-        let _ = db::scan_all(&mut conn, &pricing, move |done, total| {
+        let _ = db::scan_all(&state.conn, &pricing, move |done, total| {
             let _ = progress_app.emit("scan-progress", serde_json::json!({
                 "done": done, "total": total
             }));
@@ -389,9 +396,16 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .visible(false);
     // Transparent window + self-drawn rounded corners is a macOS look;
     // WebView2 transparency on Windows composites poorly (artifacts show
-    // through), so the window stays opaque there.
+    // through), so the window stays opaque there. The HUD-window vibrancy
+    // behind the webview gives the panel its frosted-glass material (the
+    // radius matches the panel div's rounded-2xl).
     #[cfg(target_os = "macos")]
-    let quick = quick.transparent(true);
+    let quick = quick.transparent(true).effects(WindowEffectsConfig {
+        effects: vec![WindowEffect::HudWindow],
+        state: Some(WindowEffectState::Active),
+        radius: Some(16.0),
+        color: None,
+    });
     quick.build()?;
 
     let show = MenuItem::with_id(app, "show", "打开 TokBar / Open TokBar", true, None::<&str>)?;
@@ -462,6 +476,7 @@ pub fn run() {
                 pricing: Mutex::new(pricing),
                 cache_dir: data_dir,
                 settings: Mutex::new(settings),
+                scan_lock: Mutex::new(()),
             });
             setup_tray(app)?;
             spawn_pricing_auto_refresh(app.handle().clone());

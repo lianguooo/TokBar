@@ -12,6 +12,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadError } from "@/components/LoadError";
 import { useI18n } from "@/lib/i18n";
 
 export function BlocksPage({
@@ -23,19 +24,26 @@ export function BlocksPage({
 }) {
   const { t } = useI18n();
   const [blocks, setBlocks] = useState<Block[] | null>(null);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setError(false);
     // Show roughly the last two weeks of 5-hour billing blocks.
     const sinceMs = Date.now() - 14 * 86_400_000;
     api
       .getBlocks({ sinceMs, costMode })
-      .then((b) => !cancelled && setBlocks(b));
+      .then((b) => !cancelled && setBlocks(b))
+      .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
     };
-  }, [costMode, refreshKey]);
+  }, [costMode, refreshKey, attempt]);
 
+  if (error) {
+    return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
+  }
   if (!blocks) {
     return <Skeleton className="h-80" />;
   }
@@ -80,13 +88,13 @@ export function BlocksPage({
             {b.burnRateTpm != null && (
               <Metric
                 label={t("blocks.burnRate")}
-                value={`${formatTokens(Math.round(b.burnRateTpm))}/min`}
+                value={`${formatTokens(Math.round(b.burnRateTpm))}${t("unit.perMin")}`}
               />
             )}
             {b.burnRateCostPerHour != null && (
               <Metric
                 label={t("blocks.costRate")}
-                value={`${formatCost(b.burnRateCostPerHour)}/h`}
+                value={`${formatCost(b.burnRateCostPerHour)}${t("unit.perHour")}`}
               />
             )}
             <div className="ml-auto flex flex-wrap gap-1">

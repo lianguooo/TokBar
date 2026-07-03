@@ -7,10 +7,11 @@ use tokbar_lib::{aggregate, cost::CostMode, db, pricing::PricingMap};
 fn scan_and_aggregate_real_data() {
     let tmp = std::env::temp_dir().join("tokbar-test.db");
     let _ = std::fs::remove_file(&tmp);
-    let mut conn = db::open(&tmp).expect("open db");
+    let conn = std::sync::Mutex::new(db::open(&tmp).expect("open db"));
     let pricing = PricingMap::load(None);
 
-    let stats = db::scan_all(&mut conn, &pricing, |_, _| {}).expect("scan");
+    let stats = db::scan_all(&conn, &pricing, |_, _| {}).expect("scan");
+    let conn = conn.into_inner().expect("unpoisoned");
     println!(
         "scan: {} files total, {} parsed, {} entries",
         stats.files_total, stats.files_parsed, stats.entries_inserted

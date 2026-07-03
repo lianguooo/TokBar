@@ -1,4 +1,4 @@
-use crate::pricing::{ModelPricing, PricingMap, TIER_THRESHOLD};
+use crate::pricing::{ModelPricing, TIER_THRESHOLD};
 use crate::types::UsageRecord;
 
 /// Cost mode semantics, identical to ccusage:
@@ -36,13 +36,12 @@ fn tiered_cost(tokens: u64, base: f64, above: Option<f64>) -> f64 {
     tokens as f64 * base
 }
 
-/// Calculate cost from token counts. 1-hour cache creation is billed at
-/// 2x the input rate (ccusage cost.rs behavior).
-pub fn calculate_cost(record: &UsageRecord, pricing: &PricingMap) -> f64 {
-    let Some(p) = pricing.resolve(&record.model) else {
-        return 0.0;
-    };
-    cost_from_tokens(record, &p)
+/// Calculate cost from token counts with pricing already resolved (the
+/// scanner memoizes `PricingMap::resolve` per distinct model string).
+/// 1-hour cache creation is billed at 2x the input rate (ccusage
+/// cost.rs behavior).
+pub fn calculate_cost_with(record: &UsageRecord, p: &ModelPricing) -> f64 {
+    cost_from_tokens(record, p)
 }
 
 fn cost_from_tokens(r: &UsageRecord, p: &ModelPricing) -> f64 {

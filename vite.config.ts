@@ -15,6 +15,18 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        // recharts is by far the heaviest dependency; keep it in its own
+        // chunk so the quick panel / first paint never download it.
+        manualChunks: {
+          recharts: ["recharts"],
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

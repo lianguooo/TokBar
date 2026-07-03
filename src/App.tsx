@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   BarChart3,
@@ -21,13 +28,29 @@ import {
 import { cn } from "@/lib/utils";
 import { useI18n, type I18nKey } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Logo } from "@/components/Logo";
-import { OverviewPage } from "@/pages/Overview";
-import { TrendsPage } from "@/pages/Trends";
-import { SessionsPage } from "@/pages/Sessions";
-import { ModelsPage } from "@/pages/Models";
-import { BlocksPage } from "@/pages/Blocks";
-import { SettingsPage } from "@/pages/Settings";
+
+// Lazy pages: keeps recharts and the page bodies out of the initial
+// bundle, which the lightweight quick panel shares.
+const OverviewPage = lazy(() =>
+  import("@/pages/Overview").then((m) => ({ default: m.OverviewPage })),
+);
+const TrendsPage = lazy(() =>
+  import("@/pages/Trends").then((m) => ({ default: m.TrendsPage })),
+);
+const SessionsPage = lazy(() =>
+  import("@/pages/Sessions").then((m) => ({ default: m.SessionsPage })),
+);
+const ModelsPage = lazy(() =>
+  import("@/pages/Models").then((m) => ({ default: m.ModelsPage })),
+);
+const BlocksPage = lazy(() =>
+  import("@/pages/Blocks").then((m) => ({ default: m.BlocksPage })),
+);
+const SettingsPage = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.SettingsPage })),
+);
 
 type Page = "overview" | "trends" | "sessions" | "models" | "blocks" | "settings";
 
@@ -53,11 +76,26 @@ const RANGES: { id: RangeKey; labelKey: I18nKey }[] = [
   { id: "all", labelKey: "range.all" },
 ];
 
+// Persisted like lang/theme/subscriptions: the selected range and cost
+// mode survive restarts instead of silently resetting.
+const RANGE_KEY = "tokbar-range";
+const COST_MODE_KEY = "tokbar-cost-mode";
+
+function loadRange(): RangeKey {
+  const v = localStorage.getItem(RANGE_KEY);
+  return RANGES.some((r) => r.id === v) ? (v as RangeKey) : "30d";
+}
+
+function loadCostMode(): CostMode {
+  const v = localStorage.getItem(COST_MODE_KEY);
+  return v === "auto" || v === "calculate" || v === "display" ? v : "auto";
+}
+
 function App() {
   const { t } = useI18n();
   const [page, setPage] = useState<Page>("overview");
-  const [range, setRange] = useState<RangeKey>("30d");
-  const [costMode, setCostMode] = useState<CostMode>("auto");
+  const [range, setRange] = useState<RangeKey>(loadRange);
+  const [costMode, setCostMode] = useState<CostMode>(loadCostMode);
   const [refreshKey, setRefreshKey] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [lastScan, setLastScan] = useState<ScanStats | null>(null);
@@ -92,11 +130,18 @@ function App() {
     }
   }, []);
 
+  useEffect(() => localStorage.setItem(RANGE_KEY, range), [range]);
+  useEffect(() => localStorage.setItem(COST_MODE_KEY, costMode), [costMode]);
+
   // Initial scan on launch. Live updates arrive via the backend file
-  // watcher ("usage-updated"); a 5-minute rescan remains as a fallback.
+  // watcher ("usage-updated"); a 5-minute rescan remains as a fallback,
+  // skipped while the window is hidden in the tray (closing only hides
+  // it) — no point burning disk scans nobody is looking at.
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 300_000);
+    const timer = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, 300_000);
     const unlistenUpdate = listen("usage-updated", () => {
       setRefreshKey((k) => k + 1);
     });
@@ -106,10 +151,17 @@ function App() {
         setScanProgress(e.payload.done >= e.payload.total ? null : e.payload);
       },
     );
+    // Deep links from the quick panel's stat cards.
+    const unlistenNav = listen<string>("navigate-page", (e) => {
+      if (NAV.some((n) => n.id === e.payload)) {
+        setPage(e.payload as Page);
+      }
+    });
     return () => {
       clearInterval(timer);
       unlistenUpdate.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
+      unlistenNav.then((fn) => fn());
     };
   }, [refresh]);
 
@@ -122,8 +174,15 @@ function App() {
 
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
-      <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-card/50">
+      {/* Sidebar: on macOS it stays transparent so the window vibrancy
+          (desktop blurred through) is strongest here, like Finder /
+          System Settings; elsewhere it keeps its solid surface step. */}
+      <aside
+        className={cn(
+          "flex w-52 shrink-0 flex-col border-r border-border",
+          IS_MAC ? "bg-transparent" : "bg-card/50",
+        )}
+      >
         <div
           data-tauri-drag-region
           className={cn(
@@ -145,7 +204,7 @@ function App() {
               key={item.id}
               onClick={() => setPage(item.id)}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-[color,background-color,transform] duration-150 active:scale-[0.97]",
                 page === item.id
                   ? "bg-primary/10 font-medium text-primary"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -158,8 +217,9 @@ function App() {
         </nav>
       </aside>
 
-      {/* Main */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Main: carries the content wash (translucent on macOS, solid
+          elsewhere) so data stays legible over the vibrancy. */}
+      <div className="flex min-w-0 flex-1 flex-col bg-background">
         <header
           data-tauri-drag-region
           className="flex items-center justify-between border-b border-border px-6 py-3"
@@ -191,6 +251,7 @@ function App() {
               size="sm"
               onClick={() => refresh(true)}
               disabled={scanning}
+              className="min-w-24"
             >
               {justRefreshed && !scanning ? (
                 <Check className="h-3.5 w-3.5 text-primary" />
@@ -216,6 +277,7 @@ function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
+          <Suspense fallback={<Skeleton className="h-80" />}>
           {page === "overview" && (
             <OverviewPage
               params={params}
@@ -246,6 +308,7 @@ function App() {
               lastScan={lastScan}
             />
           )}
+          </Suspense>
         </main>
       </div>
     </div>

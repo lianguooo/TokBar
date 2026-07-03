@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadError } from "@/components/LoadError";
 
 const AGENT_BADGE: Record<string, "warning" | "success" | "info"> = {
   "claude-code": "warning",
@@ -43,6 +44,8 @@ export function SessionsPage({
 }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -50,13 +53,15 @@ export function SessionsPage({
 
   useEffect(() => {
     let cancelled = false;
+    setError(false);
     api
       .getSessions({ ...params, limit: 300 })
-      .then((s) => !cancelled && setSessions(s));
+      .then((s) => !cancelled && setSessions(s))
+      .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
     };
-  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey]);
+  }, [params.sinceMs, params.untilMs, params.costMode, refreshKey, attempt]);
 
   const agents = useMemo(
     () => [...new Set((sessions ?? []).map((s) => s.agent))].sort(),
@@ -91,6 +96,9 @@ export function SessionsPage({
     }
   };
 
+  if (error) {
+    return <LoadError onRetry={() => setAttempt((a) => a + 1)} />;
+  }
   if (!sessions) {
     return <Skeleton className="h-80" />;
   }
@@ -199,7 +207,18 @@ function SessionRowGroup({
   const { t } = useI18n();
   return (
     <>
-      <TableRow onClick={onToggle} className="cursor-pointer">
+      <TableRow
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        tabIndex={0}
+        aria-expanded={isOpen}
+        className="cursor-pointer focus-visible:bg-accent/50 focus-visible:outline-none"
+      >
         <TableCell className="pr-0">
           <ChevronRight
             className={cn(
