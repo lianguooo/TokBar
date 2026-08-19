@@ -45,18 +45,25 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # macOS 代码签名与公证只在上游仓库启用(那里配置了有效的 Apple 证书
+      # Secret)。这里只在上游把 APPLE_* 写入环境;fork 上这些变量根本不存在
+      # (而非空字符串)—— tauri 见到已定义的 APPLE_CERTIFICATE 就会尝试导入证书,
+      # 空值会以 "SecKeychainItemImport: parameters not valid" 失败,故必须整个不设。
+      - name: Enable macOS signing (upstream only)
+        if: matrix.platform == 'macos-latest' && github.repository == 'peng2132/TokBar'
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
+            echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+          } >> "$GITHUB_ENV"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 代码签名与公证只在上游仓库启用(那里配置了有效的
-          # Apple 证书 Secret)。fork 上这些值解析为空 → 跳过签名,
-          # 产出未签名的 .app/.dmg,避免因借用不到的证书而构建失败。
-          APPLE_CERTIFICATE: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_TEAM_ID || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'TokBar __VERSION__'
