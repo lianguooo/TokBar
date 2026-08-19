@@ -187,6 +187,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
 /// 计费所需的 fast/priority 判定在 DB 层按时间轴决定，这里只输出原始模型名。
 fn parse_content(content: &str, session_id: &str) -> Vec<UsageRecord> {
     let mut records = Vec::new();
+    let (project, title) = extract_meta(content);
     // 旧版子代理没有通信边界标记，只有确认边界存在时才能剔除边界前的继承历史。
     let is_subagent_rollout = content
         .lines()
@@ -311,8 +312,9 @@ fn parse_content(content: &str, session_id: &str) -> Vec<UsageRecord> {
             usage.reasoning_output_tokens
         );
         records.push(UsageRecord {
+            title: title.clone(),
             agent: AGENT.to_string(),
-            project: "Codex CLI".to_string(),
+            project: project.clone(),
             session_id: session_id.to_string(),
             timestamp_ms: ts,
             model,
@@ -327,6 +329,56 @@ fn parse_content(content: &str, session_id: &str) -> Vec<UsageRecord> {
         });
     }
     records
+}
+
+/// Session project + title from a rollout. Project is the working directory's
+/// last path component (from `session_meta.cwd`), falling back to "Codex CLI";
+/// title is the first real user prompt, skipping Codex's injected `<...>`
+/// context blocks (plugin lists, environment context, user instructions).
+fn extract_meta(content: &str) -> (String, String) {
+    let mut project = String::new();
+    let mut title = String::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let kind = v.get("type").and_then(|t| t.as_str());
+        if project.is_empty() && kind == Some("session_meta") {
+            if let Some(cwd) = v.pointer("/payload/cwd").and_then(|c| c.as_str()) {
+                let name = std::path::Path::new(cwd)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !name.is_empty() {
+                    project = name;
+                }
+            }
+        }
+        if title.is_empty()
+            && v.pointer("/payload/role").and_then(|r| r.as_str()) == Some("user")
+        {
+            if let Some(blocks) = v.pointer("/payload/content").and_then(|c| c.as_array()) {
+                let text = blocks
+                    .iter()
+                    .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("input_text"))
+                    .and_then(|b| b.get("text").and_then(|t| t.as_str()));
+                if let Some(t) = text.and_then(super::util::clean_title) {
+                    title = t;
+                }
+            }
+        }
+        if !project.is_empty() && !title.is_empty() {
+            break;
+        }
+    }
+    if project.is_empty() {
+        project = "Codex CLI".to_string();
+    }
+    (project, title)
 }
 
 /// Per-turn usage as the delta between cumulative totals (ccusage
@@ -433,6 +485,28 @@ mod tests {
         assert_eq!(records[0].input_tokens, 20);
         assert_eq!(records[0].cache_read_tokens, 30);
         assert_eq!(records[0].output_tokens, 5);
+    }
+
+    /// 项目名取 session_meta.cwd 末段，标题取首条真实用户消息（跳过注入的 <...> 块）。
+    #[test]
+    fn extract_meta_uses_cwd_and_first_user_prompt() {
+        let content = r#"
+{"type":"session_meta","payload":{"cwd":"/Users/alice/Documents/ai-employee","thread_source":"user"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<app-context>desktop</app-context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>ignore me</recommended_plugins>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"帮我重构支付模块\n第二行"}]}}
+"#;
+        let (project, title) = extract_meta(content);
+        assert_eq!(project, "ai-employee");
+        assert_eq!(title, "帮我重构支付模块");
+    }
+
+    /// 无 cwd / 无用户消息时回退到 "Codex CLI" 且标题为空。
+    #[test]
+    fn extract_meta_falls_back_without_cwd_or_user() {
+        let (project, title) = extract_meta(r#"{"type":"session_meta","payload":{"thread_source":"user"}}"#);
+        assert_eq!(project, "Codex CLI");
+        assert_eq!(title, "");
     }
 
     /// 协作模式内的 reasoning_effort 应作为旧日志结构的兼容来源。

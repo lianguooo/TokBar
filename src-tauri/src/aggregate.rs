@@ -302,6 +302,8 @@ pub struct SessionRow {
     pub session_id: String,
     pub agent: String,
     pub project: String,
+    /// Session title (first user message); empty when unavailable.
+    pub title: String,
     pub first_ts: i64,
     pub last_ts: i64,
     pub cost: f64,
@@ -322,7 +324,7 @@ pub fn sessions(
     // 会话页按模型与思考强度去重展示，空强度仍保持原模型名称。
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT session_id, agent, project, MIN(timestamp_ms), MAX(timestamp_ms),
+            "SELECT session_id, agent, project, MAX(title), MIN(timestamp_ms), MAX(timestamp_ms),
                     COALESCE(SUM({cost}),0), COALESCE(SUM(total_tokens),0), COUNT(*),
                     GROUP_CONCAT(DISTINCT CASE
                         WHEN reasoning_effort = '' THEN model
@@ -338,12 +340,13 @@ pub fn sessions(
                 session_id: row.get(0)?,
                 agent: row.get(1)?,
                 project: row.get(2)?,
-                first_ts: row.get(3)?,
-                last_ts: row.get(4)?,
-                cost: row.get(5)?,
-                total_tokens: row.get(6)?,
-                requests: row.get(7)?,
-                models: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                title: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                first_ts: row.get(4)?,
+                last_ts: row.get(5)?,
+                cost: row.get(6)?,
+                total_tokens: row.get(7)?,
+                requests: row.get(8)?,
+                models: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?

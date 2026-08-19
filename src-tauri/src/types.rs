@@ -10,6 +10,10 @@ pub struct UsageRecord {
     /// Human-readable project name extracted from the log path.
     pub project: String,
     pub session_id: String,
+    /// Human-readable session title (first user message); empty when the
+    /// agent's logs carry no recoverable prompt. Same value on every record
+    /// of a session.
+    pub title: String,
     /// Epoch milliseconds (UTC).
     pub timestamp_ms: i64,
     pub model: String,

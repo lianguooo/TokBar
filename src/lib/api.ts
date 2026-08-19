@@ -77,6 +77,8 @@ export interface SessionRow {
   sessionId: string;
   agent: string;
   project: string;
+  /** Session title (first user message); empty when unavailable. */
+  title: string;
   firstTs: number;
   lastTs: number;
   cost: number;

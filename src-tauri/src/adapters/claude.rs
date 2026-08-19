@@ -120,6 +120,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
     let project = project_name_from_path(path);
+    let title = extract_title(&content);
 
     let mut records = Vec::new();
     for line in content.lines() {
@@ -166,6 +167,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             .map(|mid| format!("{}:{}", mid, raw.request_id.as_deref().unwrap_or("")));
 
         records.push(UsageRecord {
+            title: title.clone(),
             agent: AGENT.to_string(),
             project: project.clone(),
             session_id: raw.session_id.clone().unwrap_or_else(|| session_id.clone()),
@@ -182,6 +184,74 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         });
     }
     records
+}
+
+/// First real user prompt in a session file, used as its title. Skips
+/// tool-result turns (content is a list of tool_result blocks) and injected
+/// context (command wrappers, system reminders — all `<...>`-prefixed).
+fn extract_title(content: &str) -> String {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        if v.get("isMeta").and_then(|m| m.as_bool()) == Some(true) {
+            continue;
+        }
+        let candidate = match v.pointer("/message/content") {
+            Some(serde_json::Value::String(s)) => Some(s.clone()),
+            Some(serde_json::Value::Array(blocks)) => blocks
+                .iter()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .and_then(|b| b.get("text").and_then(|t| t.as_str()))
+                .map(|s| s.to_string()),
+            _ => None,
+        };
+        if let Some(title) = candidate.as_deref().and_then(super::util::clean_title) {
+            return title;
+        }
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::extract_title;
+
+    #[test]
+    fn extract_title_takes_first_real_user_prompt() {
+        // First user turn is a tool_result list (skipped), then a string prompt.
+        let content = concat!(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"out"}]}}"#,
+            "\n",
+            r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#,
+            "\n",
+            r#"{"type":"user","message":{"role":"user","content":"排查计费重复问题"}}"#,
+        );
+        assert_eq!(extract_title(content), "排查计费重复问题");
+    }
+
+    #[test]
+    fn extract_title_reads_text_block_and_skips_injected() {
+        let content = concat!(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>noise</system-reminder>"}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"add dark mode"}]}}"#,
+        );
+        assert_eq!(extract_title(content), "add dark mode");
+    }
+
+    #[test]
+    fn extract_title_empty_when_no_prompt() {
+        let content = r#"{"type":"assistant","message":{"role":"assistant","content":"hi"}}"#;
+        assert_eq!(extract_title(content), "");
+    }
 }
 
 pub fn parse_timestamp_ms(ts: &str) -> Option<i64> {

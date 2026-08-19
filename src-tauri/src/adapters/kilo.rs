@@ -93,6 +93,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             .and_then(Value::as_f64)
             .filter(|c| c.is_finite() && *c > 0.0);
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "Kilo".to_string(),
             session_id,

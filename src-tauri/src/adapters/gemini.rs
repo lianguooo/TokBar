@@ -95,6 +95,7 @@ fn build_record(
         output = t.total;
     }
     Some(UsageRecord {
+        title: String::new(),
         agent: AGENT.to_string(),
         project: "Gemini".to_string(),
         session_id: session_id.to_string(),

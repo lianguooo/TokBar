@@ -151,6 +151,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             "openclaw:{session_id}:{ts}:{model}:{input}:{output}:{cache_write}:{cache_read}"
         );
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "OpenClaw".to_string(),
             session_id: session_id.clone(),

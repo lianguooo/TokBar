@@ -109,6 +109,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             .map(|t| util::smart_unit_ms(t as i64))
             .unwrap_or_else(|| util::mtime_ms(path));
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "Hermes".to_string(),
             session_id: id.clone(),

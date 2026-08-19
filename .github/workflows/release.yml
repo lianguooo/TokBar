@@ -64,6 +64,11 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing: when these secrets are set, tauri-action signs the
+          # bundles and publishes latest.json to the release for auto-updates.
+          # On forks without the secrets, it builds normally (no updater feed).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'TokBar __VERSION__'
@@ -78,4 +83,8 @@ jobs:
             Windows 出现 SmartScreen 提示时点击"更多信息 → 仍要运行"。
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          # Updater artifacts (signed bundles + latest.json) are produced only
+          # on the upstream repo, which holds TAURI_SIGNING_PRIVATE_KEY. Forks
+          # lack the key, so enabling it there would fail the build — they build
+          # normally without an updater feed.
+          args: ${{ matrix.args }}${{ github.repository == 'lianguooo/TokBar' && ' --config {"bundle":{"createUpdaterArtifacts":true}}' || '' }}

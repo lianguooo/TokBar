@@ -13,7 +13,7 @@ use crate::pricing::{ModelPricing, PricingMap};
 use crate::types::UsageRecord;
 
 /// Bump when parsing/pricing semantics change so cached entries rebuild.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 pub fn open(db_path: &Path) -> Result<Connection, String> {
     if let Some(parent) = db_path.parent() {
@@ -40,6 +40,7 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
            date_local TEXT NOT NULL,
            model TEXT NOT NULL,
            reasoning_effort TEXT NOT NULL DEFAULT '',
+           title TEXT NOT NULL DEFAULT '',
            input_tokens INTEGER NOT NULL,
            output_tokens INTEGER NOT NULL,
            cache_creation_5m INTEGER NOT NULL,
@@ -78,6 +79,22 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
     if !has_reasoning_effort {
         conn.execute(
             "ALTER TABLE entries ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 同理为旧库补 title 列（会话名，取首条用户消息）。
+    let has_title = conn
+        .prepare("PRAGMA table_info(entries)")
+        .and_then(|mut stmt| {
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            Ok(columns.filter_map(Result::ok).any(|name| name == "title"))
+        })
+        .map_err(|e| e.to_string())?;
+    if !has_title {
+        conn.execute(
+            "ALTER TABLE entries ADD COLUMN title TEXT NOT NULL DEFAULT ''",
             [],
         )
         .map_err(|e| e.to_string())?;
@@ -350,12 +367,13 @@ fn insert_record(
         .execute(
             "INSERT INTO entries (
                dedup_key, file_path, agent, project, session_id, timestamp_ms, date_local,
-               model, reasoning_effort, input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
+               model, reasoning_effort, title, input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
                cache_read_tokens, total_tokens, cost_usd, calculated_cost
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
              ON CONFLICT(dedup_key) DO UPDATE SET
                file_path = excluded.file_path,
                reasoning_effort = excluded.reasoning_effort,
+               title = excluded.title,
                input_tokens = excluded.input_tokens,
                output_tokens = excluded.output_tokens,
                cache_creation_5m = excluded.cache_creation_5m,
@@ -375,6 +393,7 @@ fn insert_record(
                 date_local,
                 rec.model,
                 rec.reasoning_effort,
+                rec.title,
                 rec.input_tokens as i64,
                 rec.output_tokens as i64,
                 rec.cache_creation_5m as i64,

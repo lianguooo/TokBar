@@ -84,6 +84,7 @@ export function SessionsPage({
       if (!q) return true;
       return (
         s.project.toLowerCase().includes(q) ||
+        s.title.toLowerCase().includes(q) ||
         s.sessionId.toLowerCase().includes(q) ||
         s.models.toLowerCase().includes(q)
       );
@@ -237,8 +238,11 @@ function SessionRowGroup({
         </TableCell>
         <TableCell>
           <div className="max-w-56">
-            <div className="truncate font-medium">{s.project}</div>
+            <div className="truncate font-medium" title={s.title || s.project}>
+              {s.title || s.project}
+            </div>
             <div className="truncate font-mono text-xs text-muted-foreground">
+              {s.title ? `${s.project} · ` : ""}
               {formatSessionId(s.sessionId)}
             </div>
           </div>

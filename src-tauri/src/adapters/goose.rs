@@ -138,6 +138,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             continue;
         };
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "Goose".to_string(),
             session_id: id.clone(),

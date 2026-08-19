@@ -137,6 +137,7 @@ fn record_from_value(
         .filter(|c| c.is_finite() && *c > 0.0);
 
     Some(UsageRecord {
+        title: String::new(),
         agent: AGENT.to_string(),
         project: "OpenCode".to_string(),
         session_id,

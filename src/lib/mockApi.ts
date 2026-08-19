@@ -233,6 +233,7 @@ function sessions(args?: Record<string, unknown>): SessionRow[] {
       sessionId: `${agent.slice(0, 2)}-${(rnd() * 0xffffff) .toString(16).slice(0, 6)}${i}`,
       agent,
       project: PROJECTS[Math.floor(rnd() * PROJECTS.length)],
+      title: ["Refactor the auth module", "Fix billing rounding bug", "Add dark mode toggle", "Investigate slow startup"][i % 4],
       firstTs: lastTs - Math.round((0.4 + rnd() * 3) * 3_600_000),
       lastTs,
       cost,

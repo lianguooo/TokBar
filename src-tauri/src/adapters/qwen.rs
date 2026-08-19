@@ -96,6 +96,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             "qwen:{session_id}:{ts}:{model}:{input}:{output}:{cache_read}"
         );
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: project.clone(),
             session_id,

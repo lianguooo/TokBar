@@ -152,6 +152,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         .to_string();
 
     vec![UsageRecord {
+        title: String::new(),
         agent: AGENT.to_string(),
         project: "Droid".to_string(),
         session_id: session_id.clone(),

@@ -152,8 +152,13 @@ const fn rates(
 /// GLM / MiniMax / StepFun / LongCat — the JSONL `message.model` carries
 /// the real model name, so pricing them here is all that's needed.
 const BUILTIN_PRICING: &[(&str, ModelPricing)] = &[
-    // Official Anthropic pricing.
+    // Official Anthropic pricing. cache write = 1.25x input, cache read = 0.1x
+    // input, matching the LiteLLM snapshot's Opus/Sonnet entries.
     ("claude-fable-5", rates(1e-5, 5e-5, Some(1.25e-5), Some(1e-6))),
+    // Opus 5 lists at Opus 4.8 rates ($5 / $25 per 1M).
+    ("claude-opus-5", rates(5e-6, 2.5e-5, Some(6.25e-6), Some(5e-7))),
+    // Sonnet 5 lists at Sonnet 4.5 rates ($3 / $15 per 1M).
+    ("claude-sonnet-5", rates(3e-6, 1.5e-5, Some(3.75e-6), Some(3e-7))),
     // Kimi for-coding plan = k2.6 rates, ccusage parity.
     // https://platform.kimi.ai/docs/pricing/chat-k26
     ("kimi-for-coding", rates(9.5e-7, 4e-6, Some(1.1875e-6), Some(1.6e-7))),
@@ -359,6 +364,21 @@ mod tests {
         assert_eq!(sol.input(), 5e-6);
         assert_eq!(sol.output(), 3e-5);
         assert!(map.find("gpt-5.6-luna").is_some());
+    }
+
+    #[test]
+    fn builtin_prices_claude_5_family() {
+        // opus-5 / sonnet-5 ship in neither the snapshot nor LiteLLM yet, so
+        // the builtin table must price them (else cache-heavy usage bills $0).
+        let map = PricingMap::load(None);
+        let opus = map.resolve("claude-opus-5").expect("opus-5 priced");
+        assert_eq!(opus.input(), 5e-6);
+        assert_eq!(opus.output(), 2.5e-5);
+        assert_eq!(opus.cache_read(), 5e-7);
+        let sonnet = map.resolve("claude-sonnet-5").expect("sonnet-5 priced");
+        assert_eq!(sonnet.input(), 3e-6);
+        assert_eq!(sonnet.output(), 1.5e-5);
+        assert_eq!(sonnet.cache_read(), 3e-7);
     }
 
     #[test]

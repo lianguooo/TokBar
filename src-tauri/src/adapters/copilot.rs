@@ -348,6 +348,7 @@ fn build_candidate(
         response_id,
         dedup_key: dedup_key.clone(),
         record: UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "GitHub Copilot CLI".to_string(),
             session_id,

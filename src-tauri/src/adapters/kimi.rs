@@ -130,6 +130,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             usage.input_cache_read
         );
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "Kimi CLI".to_string(),
             session_id: session_id.clone(),

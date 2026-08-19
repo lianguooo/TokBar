@@ -240,6 +240,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             ),
         };
         records.push(UsageRecord {
+            title: String::new(),
             agent: AGENT.to_string(),
             project: "Codebuff".to_string(),
             session_id: session_id.clone(),

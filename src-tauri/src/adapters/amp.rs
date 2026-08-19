@@ -177,6 +177,7 @@ fn record(
     cache_read: u64,
 ) -> UsageRecord {
     UsageRecord {
+        title: String::new(),
         agent: AGENT.to_string(),
         project: "Amp".to_string(),
         session_id: thread_id.to_string(),

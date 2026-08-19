@@ -30,6 +30,7 @@ import { useI18n, type I18nKey } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Logo } from "@/components/Logo";
+import { UpdateBanner } from "@/components/UpdateBanner";
 
 // Lazy pages: keeps recharts and the page bodies out of the initial
 // bundle, which the lightweight quick panel shares.
@@ -220,6 +221,7 @@ function App() {
       {/* Main: carries the content wash (translucent on macOS, solid
           elsewhere) so data stays legible over the vibrancy. */}
       <div className="flex min-w-0 flex-1 flex-col bg-background">
+        <UpdateBanner />
         <header
           data-tauri-drag-region
           className="flex items-center justify-between border-b border-border px-6 py-3"

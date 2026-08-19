@@ -91,6 +91,24 @@ pub fn get_str<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a str> {
         .find(|s| !s.is_empty())
 }
 
+/// Normalize a raw first-user-message string into a one-line session title,
+/// or `None` when it isn't a usable prompt. Rejects empty text and injected
+/// context blocks (agents wrap plugin lists, environment context, slash
+/// commands, and system reminders in `<...>` tags), then collapses to the
+/// first non-empty line capped at 120 chars.
+pub fn clean_title(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('<') {
+        return None;
+    }
+    let line = trimmed.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if line.is_empty() || line.starts_with('<') {
+        return None;
+    }
+    let title: String = line.chars().take(120).collect();
+    Some(title)
+}
+
 /// Interpret an integer timestamp that may be in seconds, milliseconds,
 /// microseconds, or nanoseconds (ccusage smart-unit detection).
 pub fn smart_unit_ms(n: i64) -> i64 {
