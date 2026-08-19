@@ -139,6 +139,9 @@ export function rangeToSinceMs(range: RangeKey): number | undefined {
 
 export const api = {
   refreshData: () => call<ScanStats>("refresh_data"),
+  /** Pull the latest LiteLLM pricing table and re-price all usage.
+   *  Resolves to the number of models in the refreshed table. */
+  refreshPricing: () => call<number>("refresh_pricing"),
   getOverview: (p: QueryParams) => call<Overview>("get_overview", { ...p }),
   getDaily: (p: QueryParams) => call<DailyRow[]>("get_daily", { ...p }),
   /** Same row shape as getDaily, bucketed by local hour ("HH:00"). */

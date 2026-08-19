@@ -60,6 +60,30 @@ export function SettingsPage({
   // Two-step delete: first click arms the button (turns into a red
   // "confirm" label), second click deletes; auto-disarms after 3s.
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [pricingBusy, setPricingBusy] = useState(false);
+  const [pricingMsg, setPricingMsg] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  const refreshPricing = async () => {
+    setPricingBusy(true);
+    setPricingMsg(null);
+    try {
+      const count = await api.refreshPricing();
+      setPricingMsg({
+        ok: true,
+        text: t("settings.pricingRefreshed", { count }),
+      });
+    } catch (e) {
+      setPricingMsg({
+        ok: false,
+        text: t("settings.pricingRefreshFailed", { error: String(e) }),
+      });
+    } finally {
+      setPricingBusy(false);
+    }
+  };
 
   const askRemove = (id: string) => {
     if (confirmRemove === id) {
@@ -523,10 +547,31 @@ export function SettingsPage({
           <Database className="h-4 w-4 text-muted-foreground" />
           <CardTitle>{t("settings.pricing")}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             {t("settings.pricingDesc")}
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={refreshPricing}
+              disabled={pricingBusy}
+              className="rounded-full border border-border px-3 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              {pricingBusy
+                ? t("settings.pricingRefreshing")
+                : t("settings.pricingRefresh")}
+            </button>
+            {pricingMsg && (
+              <span
+                className={cn(
+                  "text-xs",
+                  pricingMsg.ok ? "text-muted-foreground" : "text-destructive",
+                )}
+              >
+                {pricingMsg.text}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

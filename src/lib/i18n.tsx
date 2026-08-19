@@ -139,6 +139,10 @@ const en = {
   "settings.pricing": "Pricing Data",
   "settings.pricingDesc":
     "Cost is calculated from LiteLLM's community model pricing database. Rates refresh automatically once a day (checked at launch). New rates apply to new usage going forward — historical costs keep the rates in effect when they were recorded.",
+  "settings.pricingRefresh": "Update pricing now",
+  "settings.pricingRefreshing": "Updating…",
+  "settings.pricingRefreshed": "Updated — {count} models, all usage re-priced.",
+  "settings.pricingRefreshFailed": "Update failed: {error}",
 
   // Quick panel (menu bar popover)
   "quick.todayCost": "Today's Cost",
@@ -303,6 +307,10 @@ const zh: Record<keyof typeof en, string> = {
   "settings.pricing": "定价数据",
   "settings.pricingDesc":
     "成本基于 LiteLLM 社区模型价格库计算。价格每天自动更新一次(启动时检查),新价格只用于之后的新增用量 —— 历史成本保持记录时的价格不变。",
+  "settings.pricingRefresh": "立即更新价格",
+  "settings.pricingRefreshing": "更新中…",
+  "settings.pricingRefreshed": "已更新 —— 共 {count} 个模型,全部用量已重新计价。",
+  "settings.pricingRefreshFailed": "更新失败:{error}",
 
   "quick.todayCost": "今日成本",
   "quick.todayTokens": "今日 Token",

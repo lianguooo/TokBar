@@ -355,6 +355,8 @@ export async function mockInvoke<T>(
         entriesInserted: 42,
         durationMs: 187,
       } satisfies ScanStats as T;
+    case "refresh_pricing":
+      return 391 as T;
     case "get_overview":
       return overview(filtered(args)) as T;
     case "get_daily":

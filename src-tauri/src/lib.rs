@@ -107,6 +107,42 @@ fn refresh_data(
     Ok(stats)
 }
 
+/// Manually pull the latest LiteLLM pricing table, then re-price all
+/// cached usage under the new rates. Unlike the daily background refresh
+/// (which only affects newly scanned files), this clears the scan cache so
+/// every file is re-parsed and re-costed. Returns the number of models in
+/// the refreshed table. Surfaces the fetch error to the UI on failure,
+/// instead of the background refresh's silent swallow.
+#[tauri::command]
+fn refresh_pricing(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<usize, String> {
+    let count = PricingMap::refresh_online(&state.cache_dir)?;
+    {
+        let mut pricing = state.pricing.lock().map_err(|e| e.to_string())?;
+        *pricing = PricingMap::load(Some(state.cache_dir.clone()));
+    }
+    {
+        let _scan_guard = state.scan_lock.lock().map_err(|e| e.to_string())?;
+        {
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM scanned_files", [])
+                .map_err(|e| e.to_string())?;
+        }
+        let pricing = state.pricing.lock().map_err(|e| e.to_string())?;
+        let progress_app = app.clone();
+        db::scan_all(&state.conn, &pricing, move |done, total| {
+            let _ = progress_app.emit(
+                "scan-progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        })?;
+    }
+    update_tray_title(&app, &state);
+    Ok(count)
+}
+
 /// Render today's usage next to the menu bar icon (macOS), according to
 /// the configured tray display mode.
 fn update_tray_title(app: &tauri::AppHandle, state: &tauri::State<AppState>) {
@@ -498,6 +534,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             refresh_data,
+            refresh_pricing,
             show_main_window,
             set_tray_mode,
             get_tray_mode,

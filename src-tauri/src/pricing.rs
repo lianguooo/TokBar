@@ -7,8 +7,13 @@ use serde::Deserialize;
 /// same data source as ccusage: BerriAI/litellm model_prices_and_context_window.json
 const EMBEDDED_PRICING: &str = include_str!("../data/pricing-snapshot.json");
 
-const LITELLM_URL: &str =
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+/// Pricing sources tried in order. GitHub raw first; the jsDelivr mirror
+/// is the fallback for networks where raw.githubusercontent.com is blocked
+/// (e.g. mainland China), so a manual refresh can still succeed there.
+const LITELLM_URLS: &[&str] = &[
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+    "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json",
+];
 
 /// Threshold for tiered (long-context) pricing, same as ccusage.
 pub const TIER_THRESHOLD: u64 = 200_000;
@@ -190,12 +195,24 @@ impl PricingMap {
     /// Fetch latest LiteLLM pricing and write it to the cache dir.
     /// Returns the number of models on success.
     pub fn refresh_online(cache_dir: &PathBuf) -> Result<usize, String> {
-        let body = ureq::get(LITELLM_URL)
-            .timeout(std::time::Duration::from_secs(15))
-            .call()
-            .map_err(|e| e.to_string())?
-            .into_string()
-            .map_err(|e| e.to_string())?;
+        let mut last_err = String::from("no pricing source configured");
+        let body = LITELLM_URLS
+            .iter()
+            .find_map(|url| {
+                match ureq::get(url)
+                    .timeout(std::time::Duration::from_secs(15))
+                    .call()
+                    .map_err(|e| e.to_string())
+                    .and_then(|resp| resp.into_string().map_err(|e| e.to_string()))
+                {
+                    Ok(body) => Some(body),
+                    Err(e) => {
+                        last_err = format!("{url}: {e}");
+                        None
+                    }
+                }
+            })
+            .ok_or(last_err)?;
         std::fs::create_dir_all(cache_dir).map_err(|e| e.to_string())?;
         let subset: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&body)
@@ -331,6 +348,17 @@ mod tests {
         // Unlisted models carry no published multiplier.
         assert_eq!(fast_multiplier_for("gpt-5"), 1.0);
         assert_eq!(fast_multiplier_for("gpt-5.1-codex"), 1.0);
+    }
+
+    #[test]
+    fn embedded_snapshot_parses_and_has_current_models() {
+        // Guards against a malformed snapshot and against the offline
+        // baseline silently lacking the gpt-5.6 family users run today.
+        let map = PricingMap::load(None);
+        let sol = map.find("gpt-5.6-sol").expect("gpt-5.6-sol in snapshot");
+        assert_eq!(sol.input(), 5e-6);
+        assert_eq!(sol.output(), 3e-5);
+        assert!(map.find("gpt-5.6-luna").is_some());
     }
 
     #[test]
