@@ -48,14 +48,15 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 代码签名(Developer ID Application 证书,base64 编码的 .p12)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # macOS 公证(Apple ID + App 专用密码)
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS 代码签名与公证只在上游仓库启用(那里配置了有效的
+          # Apple 证书 Secret)。fork 上这些值解析为空 → 跳过签名,
+          # 产出未签名的 .app/.dmg,避免因借用不到的证书而构建失败。
+          APPLE_CERTIFICATE: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.repository == 'peng2132/TokBar' && secrets.APPLE_TEAM_ID || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'TokBar __VERSION__'
@@ -65,7 +66,8 @@ jobs:
             - macOS (Intel): `*_x64.dmg`
             - Windows: `*_x64-setup.exe` 或 `*.msi`
 
-            macOS 安装包已签名并经过 Apple 公证,可直接打开。
+            macOS: 已签名版本可直接打开;未签名版本首次打开请右键点按 App 选「打开」,
+            或在「系统设置 → 隐私与安全性」中点「仍要打开」。
             Windows 出现 SmartScreen 提示时点击"更多信息 → 仍要运行"。
           releaseDraft: true
           prerelease: false
