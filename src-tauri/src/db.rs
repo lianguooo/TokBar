@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use chrono::{Local, TimeZone};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::adapters;
@@ -13,7 +13,7 @@ use crate::pricing::{ModelPricing, PricingMap};
 use crate::types::UsageRecord;
 
 /// Bump when parsing/pricing semantics change so cached entries rebuild.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 pub fn open(db_path: &Path) -> Result<Connection, String> {
     if let Some(parent) = db_path.parent() {
@@ -52,7 +52,16 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
          CREATE INDEX IF NOT EXISTS idx_entries_ts ON entries(timestamp_ms);
          CREATE INDEX IF NOT EXISTS idx_entries_date ON entries(date_local);
          CREATE INDEX IF NOT EXISTS idx_entries_file ON entries(file_path);
-         CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(agent, session_id);",
+         CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(agent, session_id);
+         -- Codex service-tier timeline: Codex logs carry no historical tier,
+         -- so we sample config.toml at scan time and price each record by the
+         -- tier active at its own timestamp. Kept across schema-version rebuilds
+         -- (the version reset below only clears entries/scanned_files) so past
+         -- tier observations are never lost.
+         CREATE TABLE IF NOT EXISTS codex_tier_history (
+           observed_at_ms INTEGER NOT NULL,
+           fast INTEGER NOT NULL
+         );",
     )
     .map_err(|e| e.to_string())?;
 
@@ -103,6 +112,58 @@ struct FileMeta {
     file: PathBuf,
     mtime_ms: i64,
     size: i64,
+}
+
+/// Codex service-tier observations over time, ascending by timestamp.
+/// Pricing looks up the tier active when each request happened rather than
+/// applying the current config retroactively to all history.
+struct TierAxis(Vec<(i64, bool)>);
+
+impl TierAxis {
+    /// Fast tier active at `ts`: the latest observation at or before `ts`.
+    /// Requests predating the first observation (usage that existed before
+    /// this machine ever recorded a tier) are treated as default/standard,
+    /// since the historical tier is unknown and must not be over-billed.
+    fn fast_at(&self, ts: i64) -> bool {
+        self.0
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= ts)
+            .is_some_and(|(_, fast)| *fast)
+    }
+}
+
+/// Record the current Codex tier on the timeline (only when it changed
+/// since the last observation), then load the full timeline for pricing.
+fn observe_codex_tier(guard: &Connection) -> Result<TierAxis, String> {
+    let current_fast = adapters::codex::config_fast_tier();
+    let last_fast: Option<bool> = guard
+        .query_row(
+            "SELECT fast FROM codex_tier_history ORDER BY observed_at_ms DESC LIMIT 1",
+            [],
+            |row| row.get::<_, i64>(0).map(|v| v != 0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if last_fast != Some(current_fast) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        guard
+            .execute(
+                "INSERT INTO codex_tier_history (observed_at_ms, fast) VALUES (?1, ?2)",
+                params![now_ms, current_fast as i64],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    let mut stmt = guard
+        .prepare("SELECT observed_at_ms, fast FROM codex_tier_history ORDER BY observed_at_ms ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)? != 0)))
+        .map_err(|e| e.to_string())?;
+    Ok(TierAxis(rows.filter_map(Result::ok).collect()))
 }
 
 /// Pure diff of the on-disk file list against the cached scan state:
@@ -174,8 +235,9 @@ pub fn scan_all(
     stats.files_total = current.len();
 
     // Phase B (short lock): load the cached scan state in one query
-    // (instead of one SELECT per file), diff, and drop deleted files.
-    let changed: Vec<usize> = {
+    // (instead of one SELECT per file), diff, drop deleted files, and
+    // sample the current Codex service tier onto its timeline.
+    let (changed, tier_axis): (Vec<usize>, TierAxis) = {
         let mut guard = conn.lock().map_err(|e| e.to_string())?;
         let known: HashMap<String, (i64, i64)> = {
             let mut stmt = guard
@@ -200,7 +262,8 @@ pub fn scan_all(
             tx.commit().map_err(|e| e.to_string())?;
             stats.files_removed = deleted.len();
         }
-        changed
+        let tier_axis = observe_codex_tier(&guard)?;
+        (changed, tier_axis)
     };
 
     // Phases C+D, chunked: parse a batch of files without the lock
@@ -221,13 +284,23 @@ pub fn scan_all(
             let priced = records
                 .into_iter()
                 .map(|rec| {
-                    let cost = match price_cache.get(&rec.model) {
+                    // Codex has no per-event tier; price by the tier active at
+                    // the request's timestamp. The "-fast" suffix routes
+                    // `PricingMap::resolve` to the fast-scaled rates.
+                    let price_model = if fm.agent == adapters::codex::AGENT
+                        && tier_axis.fast_at(rec.timestamp_ms)
+                    {
+                        format!("{}-fast", rec.model)
+                    } else {
+                        rec.model.clone()
+                    };
+                    let cost = match price_cache.get(&price_model) {
                         Some(p) => p.as_ref().map_or(0.0, |p| calculate_cost_with(&rec, p)),
                         None => {
-                            let resolved = pricing.resolve(&rec.model);
+                            let resolved = pricing.resolve(&price_model);
                             let cost =
                                 resolved.as_ref().map_or(0.0, |p| calculate_cost_with(&rec, p));
-                            price_cache.insert(rec.model.clone(), resolved);
+                            price_cache.insert(price_model, resolved);
                             cost
                         }
                     };
@@ -328,6 +401,24 @@ mod tests {
             mtime_ms,
             size,
         }
+    }
+
+    #[test]
+    fn tier_axis_prices_each_request_by_its_own_era() {
+        // fast from t=100, back to default at t=200. First observation is
+        // fast on purpose, to prove pre-history is still treated as default.
+        let axis = TierAxis(vec![(100, true), (200, false)]);
+        // Usage predating the first observation → default, never billed fast.
+        assert!(!axis.fast_at(10));
+        assert!(!axis.fast_at(99)); // just before first observation
+        assert!(axis.fast_at(100)); // boundary is inclusive
+        assert!(axis.fast_at(150)); // fast era
+        assert!(!axis.fast_at(250)); // reverted to default
+    }
+
+    #[test]
+    fn tier_axis_empty_is_not_fast() {
+        assert!(!TierAxis(vec![]).fast_at(1_000));
     }
 
     #[test]

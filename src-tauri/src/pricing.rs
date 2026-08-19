@@ -16,6 +16,9 @@ pub const TIER_THRESHOLD: u64 = 200_000;
 /// Fast/priority service-tier cost multipliers, from ccusage
 /// fast-multiplier-overrides.json (LiteLLM does not carry these).
 const FAST_EXACT: &[(&str, f64)] = &[
+    // GPT-5.6 family (Sol/Terra/Luna) — Codex Fast credit consumption 2.5x;
+    // boundary matching below extends this to the -sol/-luna/-terra suffixes.
+    ("gpt-5.6", 2.5),
     ("gpt-5.5", 2.5),
     ("gpt-5.4", 2.0),
     ("gpt-5.3-codex", 2.0),
@@ -99,7 +102,16 @@ fn fast_multiplier_for(base_model: &str) -> f64 {
     {
         return *m;
     }
-    1.0
+    // Boundary-aware match so a more specific model inherits its base's
+    // multiplier: "gpt-5.6-sol"/"gpt-5.4-codex" contain the base key at a
+    // boundary. Direction is one-way (model contains key) so a generic
+    // "gpt-5" never absorbs a more specific "gpt-5.4" rate. Longest wins.
+    FAST_EXACT
+        .iter()
+        .filter(|(k, _)| contains_at_boundary(&normalized, &normalize_model(k)))
+        .max_by_key(|(k, _)| normalize_model(k).len())
+        .map(|(_, m)| *m)
+        .unwrap_or(1.0)
 }
 
 pub struct PricingMap {
@@ -298,4 +310,38 @@ fn contains_at_boundary(haystack: &str, needle: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_multiplier_covers_codex_suffixed_names() {
+        // Exact family names.
+        assert_eq!(fast_multiplier_for("gpt-5.6"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.5"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.4"), 2.0);
+        // Codex / variant suffixes must inherit the base multiplier.
+        assert_eq!(fast_multiplier_for("gpt-5.6-sol"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.6-luna"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.6-terra"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.5-codex"), 2.5);
+        assert_eq!(fast_multiplier_for("gpt-5.4-codex"), 2.0);
+        // Unlisted models carry no published multiplier.
+        assert_eq!(fast_multiplier_for("gpt-5"), 1.0);
+        assert_eq!(fast_multiplier_for("gpt-5.1-codex"), 1.0);
+    }
+
+    #[test]
+    fn resolve_scales_base_price_by_fast_multiplier() {
+        let mut entries = HashMap::new();
+        entries.insert("gpt-5.6-sol".to_string(), rates(5e-6, 3e-5, None, None));
+        let map = PricingMap { entries };
+
+        let base = map.resolve("gpt-5.6-sol").unwrap();
+        let fast = map.resolve("gpt-5.6-sol-fast").unwrap();
+        assert_eq!(fast.input(), base.input() * 2.5);
+        assert_eq!(fast.output(), base.output() * 2.5);
+    }
 }

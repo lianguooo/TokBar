@@ -120,11 +120,13 @@ pub fn collect_files() -> Vec<PathBuf> {
 }
 
 /// Codex does not record the service tier per event; ccusage detects it
-/// from `service_tier = "fast" | "priority"` in the Codex config.toml and
-/// bills all usage at the fast multiplier when set.
-pub fn fast_tier_enabled() -> bool {
-    static FAST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FAST.get_or_init(detect_fast_tier)
+/// from `service_tier = "fast" | "priority"` in the Codex config.toml.
+/// Because the rollout carries no historical tier, the scanner samples
+/// this at scan time and records it on a timeline (see `db::scan_all`),
+/// so a later config change no longer re-prices past usage. This reads
+/// the *current* config fresh on every call — no process-wide caching.
+pub fn config_fast_tier() -> bool {
+    detect_fast_tier()
 }
 
 /// 遍历所有 Codex home 的 config.toml，任一含 fast/priority 即启用 fast tier。
@@ -178,11 +180,12 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    parse_content(&content, &session_id, fast_tier_enabled())
+    parse_content(&content, &session_id)
 }
 
 /// 解析单个 Codex rollout，并剔除子代理继承的父任务历史快照。
-fn parse_content(content: &str, session_id: &str, fast: bool) -> Vec<UsageRecord> {
+/// 计费所需的 fast/priority 判定在 DB 层按时间轴决定，这里只输出原始模型名。
+fn parse_content(content: &str, session_id: &str) -> Vec<UsageRecord> {
     let mut records = Vec::new();
     // 旧版子代理没有通信边界标记，只有确认边界存在时才能剔除边界前的继承历史。
     let is_subagent_rollout = content
@@ -291,10 +294,7 @@ fn parse_content(content: &str, session_id: &str, fast: bool) -> Vec<UsageRecord
         let Some(ts) = raw.timestamp.as_deref().and_then(parse_timestamp_ms) else {
             continue;
         };
-        let mut model = current_model.clone().unwrap_or_else(|| "gpt-5".to_string());
-        if fast {
-            model.push_str("-fast");
-        }
+        let model = current_model.clone().unwrap_or_else(|| "gpt-5".to_string());
         // Codex reports input inclusive of cached reads; the billable
         // fresh input is input - cached (ccusage non_cached_input_tokens).
         let cached = usage.cached_input_tokens.min(usage.input_tokens);
@@ -365,7 +365,7 @@ mod tests {
 {"timestamp":"2026-08-18T00:00:01.004Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":290,"cached_input_tokens":230,"output_tokens":33,"reasoning_output_tokens":6,"total_tokens":323},"last_token_usage":{"input_tokens":40,"cached_input_tokens":30,"output_tokens":8,"reasoning_output_tokens":1,"total_tokens":48}}}}
 "#;
 
-        let records = parse_content(content, "subagent-session", false);
+        let records = parse_content(content, "subagent-session");
 
         assert_eq!(records.len(), 2);
         assert!(records.iter().all(|record| record.model == "gpt-5.6-luna"));
@@ -390,7 +390,7 @@ mod tests {
 {"timestamp":"2026-08-18T00:00:00.003Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":120,"output_tokens":20,"reasoning_output_tokens":4,"total_tokens":170},"last_token_usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":60}}}}
 "#;
 
-        let records = parse_content(content, "legacy-subagent-session", false);
+        let records = parse_content(content, "legacy-subagent-session");
 
         assert_eq!(records.len(), 2);
         assert!(records.iter().all(|record| record.model == "gpt-5.6-sol"));
@@ -412,7 +412,7 @@ mod tests {
 {"timestamp":"2026-08-18T00:00:00.004Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":120,"output_tokens":20,"reasoning_output_tokens":4,"total_tokens":170},"last_token_usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":60}}}}
 "#;
 
-        let records = parse_content(content, "regular-session", false);
+        let records = parse_content(content, "regular-session");
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].total_tokens(), 110);
@@ -427,7 +427,7 @@ mod tests {
 {"timestamp":"2026-08-18T00:00:00.001Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":30,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":55}}}}
 "#;
 
-        let records = parse_content(content, "legacy-session", false);
+        let records = parse_content(content, "legacy-session");
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].input_tokens, 20);
@@ -443,7 +443,7 @@ mod tests {
 {"timestamp":"2026-08-18T00:00:00.001Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":30,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":55}}}}
 "#;
 
-        let records = parse_content(content, "fallback-effort-session", false);
+        let records = parse_content(content, "fallback-effort-session");
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].model, "gpt-5.6-sol");
