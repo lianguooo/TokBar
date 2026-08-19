@@ -13,6 +13,8 @@ pub struct UsageRecord {
     /// Epoch milliseconds (UTC).
     pub timestamp_ms: i64,
     pub model: String,
+    /// 模型调用时的思考强度；不提供该信息的 Agent 保持为空。
+    pub reasoning_effort: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
     /// 5-minute ephemeral cache creation tokens (or total cache creation

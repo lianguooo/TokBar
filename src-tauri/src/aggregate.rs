@@ -319,11 +319,15 @@ pub fn sessions(
 ) -> Result<Vec<SessionRow>, String> {
     let cost = cost_expr(mode);
     let range = range_clause(since_ms, until_ms);
+    // 会话页按模型与思考强度去重展示，空强度仍保持原模型名称。
     let mut stmt = conn
         .prepare(&format!(
             "SELECT session_id, agent, project, MIN(timestamp_ms), MAX(timestamp_ms),
                     COALESCE(SUM({cost}),0), COALESCE(SUM(total_tokens),0), COUNT(*),
-                    GROUP_CONCAT(DISTINCT model)
+                    GROUP_CONCAT(DISTINCT CASE
+                        WHEN reasoning_effort = '' THEN model
+                        ELSE model || '·' || reasoning_effort
+                    END)
              FROM entries WHERE {range}
              GROUP BY agent, session_id ORDER BY MAX(timestamp_ms) DESC LIMIT ?1"
         ))

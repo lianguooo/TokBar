@@ -142,6 +142,7 @@ fn record_from_value(
         session_id,
         timestamp_ms,
         model: normalize_model(model),
+        reasoning_effort: String::new(),
         input_tokens: input,
         output_tokens: output,
         cache_creation_5m: cache_write,

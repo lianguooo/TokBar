@@ -98,6 +98,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             session_id,
             timestamp_ms: ts,
             model: model.to_string(),
+            reasoning_effort: String::new(),
             input_tokens: input,
             output_tokens: output,
             cache_creation_5m: cache_write,

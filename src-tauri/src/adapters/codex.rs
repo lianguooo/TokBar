@@ -16,12 +16,31 @@ struct RawLine {
 }
 
 #[derive(Debug, Deserialize)]
+struct RawLineKind<'a> {
+    #[serde(rename = "type", borrow)]
+    kind: Option<&'a str>,
+}
+
+#[derive(Debug, Deserialize)]
 struct RawPayload {
     #[serde(rename = "type")]
     kind: Option<String>,
     info: Option<RawInfo>,
     model: Option<String>,
     model_name: Option<String>,
+    thread_source: Option<String>,
+    effort: Option<String>,
+    collaboration_mode: Option<RawCollaborationMode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCollaborationMode {
+    settings: Option<RawCollaborationSettings>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCollaborationSettings {
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,15 +66,10 @@ struct RawTokenUsage {
     total_tokens: u64,
 }
 
-/// Codex usage dirs: `sessions/` plus `archived_sessions/` (ccusage
-/// scans both) under every Codex home.
-///
-/// Homes come from $CODEX_HOME (comma-separated, ccusage parity) when
-/// set. Otherwise ~/.codex plus any sibling `~/.codex{-_.}*` home that
-/// has a `sessions/` dir — multi-account setups launch the second
-/// Codex with CODEX_HOME pointing at such a clone, and a GUI app never
-/// sees that per-shell variable.
-pub fn data_dirs() -> Vec<PathBuf> {
+/// 发现所有 Codex home 目录：
+/// 1. $CODEX_HOME 环境变量（逗号分隔，兼容 ccusage）
+/// 2. 默认 ~/.codex 加上同级的 `.codex{-_.}*` 克隆目录（多账号场景）
+fn codex_homes() -> Vec<PathBuf> {
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Ok(raw) = std::env::var("CODEX_HOME") {
         for part in raw.split(',') {
@@ -72,6 +86,7 @@ pub fn data_dirs() -> Vec<PathBuf> {
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
+                // 同级 .codex-xxx / .codex_xxx / .codex.xxx 克隆目录
                 let is_clone = name
                     .strip_prefix(".codex")
                     .is_some_and(|rest| rest.starts_with(['-', '_', '.']));
@@ -84,6 +99,12 @@ pub fn data_dirs() -> Vec<PathBuf> {
     bases.sort();
     bases.dedup();
     bases
+}
+
+/// Codex usage dirs: `sessions/` plus `archived_sessions/` (ccusage
+/// scans both) under every Codex home.
+pub fn data_dirs() -> Vec<PathBuf> {
+    codex_homes()
         .iter()
         .flat_map(|base| [base.join("sessions"), base.join("archived_sessions")])
         .filter(|p| p.is_dir())
@@ -106,18 +127,22 @@ pub fn fast_tier_enabled() -> bool {
     *FAST.get_or_init(detect_fast_tier)
 }
 
+/// 遍历所有 Codex home 的 config.toml，任一含 fast/priority 即启用 fast tier。
+/// 旧实现仅检查单个 home，Windows 上因路径差异可能漏检。
 fn detect_fast_tier() -> bool {
-    let base = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")));
-    let Some(config) = base.map(|b| b.join("config.toml")) else {
-        return false;
-    };
-    let Ok(content) = std::fs::read_to_string(config) else {
-        return false;
-    };
+    codex_homes().into_iter().any(|base| {
+        let config = base.join("config.toml");
+        let Ok(content) = std::fs::read_to_string(config) else {
+            return false;
+        };
+        config_has_fast_tier(&content)
+    })
+}
+
+/// 检查 config.toml 内容是否包含 `service_tier = "fast"` 或 `"priority"`。
+fn config_has_fast_tier(content: &str) -> bool {
     content.lines().any(|line| {
+        // 去除行内注释后解析 key = value
         let setting = line.split('#').next().unwrap_or_default().trim();
         let Some((key, value)) = setting.split_once('=') else {
             return false;
@@ -153,13 +178,35 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    let fast = fast_tier_enabled();
+    parse_content(&content, &session_id, fast_tier_enabled())
+}
 
+/// 解析单个 Codex rollout，并剔除子代理继承的父任务历史快照。
+fn parse_content(content: &str, session_id: &str, fast: bool) -> Vec<UsageRecord> {
     let mut records = Vec::new();
+    // 旧版子代理没有通信边界标记，只有确认边界存在时才能剔除边界前的继承历史。
+    let is_subagent_rollout = content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<RawLine>(line.trim()).ok())
+        .any(|raw| {
+            raw.kind.as_deref() == Some("session_meta")
+                && raw
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.thread_source.as_deref())
+                    == Some("subagent")
+        });
+    let has_communication_boundary = is_subagent_rollout
+        && content
+            .lines()
+            .filter_map(|line| serde_json::from_str::<RawLineKind<'_>>(line.trim()).ok())
+            .any(|raw| raw.kind == Some("inter_agent_communication_metadata"));
     // token_count events usually omit the model; track the session's
     // current model from turn_context lines (ccusage parser behavior).
     let mut current_model: Option<String> = None;
+    let mut current_effort: Option<String> = None;
     let mut previous_totals: Option<RawTokenUsage> = None;
+    let mut usage_started = !has_communication_boundary;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -168,11 +215,36 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         let Ok(raw) = serde_json::from_str::<RawLine>(line) else {
             continue;
         };
+
+        // 新版子代理从通信边界后开始计量，边界前累计值仍参与后续差分。
+        if has_communication_boundary
+            && raw.kind.as_deref() == Some("inter_agent_communication_metadata")
+        {
+            usage_started = true;
+            continue;
+        }
+
         let Some(payload) = raw.payload else { continue };
         if let Some(m) = payload.model.clone().or_else(|| payload.model_name.clone()) {
             if !m.is_empty() {
                 current_model = Some(m);
             }
+        }
+        // 优先读取当前 turn 的 effort，兼容其位于协作模式 settings 中的日志结构。
+        if let Some(effort) = payload
+            .effort
+            .clone()
+            .filter(|effort| !effort.is_empty())
+            .or_else(|| {
+                payload
+                    .collaboration_mode
+                    .as_ref()
+                    .and_then(|mode| mode.settings.as_ref())
+                    .and_then(|settings| settings.reasoning_effort.clone())
+                    .filter(|effort| !effort.is_empty())
+            })
+        {
+            current_effort = Some(effort);
         }
         if raw.kind.as_deref() != Some("event_msg")
             || payload.kind.as_deref() != Some("token_count")
@@ -184,11 +256,29 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             current_model = Some(m);
         }
         let totals = info.total_token_usage;
-        let usage = info
-            .last_token_usage
-            .or_else(|| totals.map(|t| subtract_usage(&t, previous_totals.as_ref())));
+        // 累计值差分可同时规避 Codex 重复写入的 last_token_usage 终态事件。
+        let usage = totals
+            .map(|t| {
+                let counters_regressed = previous_totals.as_ref().is_some_and(|previous| {
+                    t.input_tokens < previous.input_tokens
+                        || t.cached_input_tokens < previous.cached_input_tokens
+                        || t.output_tokens < previous.output_tokens
+                        || t.reasoning_output_tokens < previous.reasoning_output_tokens
+                        || t.total_tokens < previous.total_tokens
+                });
+                if counters_regressed {
+                    // 恢复或日志轮转造成累计值回退时，回退到本次用量，避免漏计当前请求。
+                    info.last_token_usage.unwrap_or(t)
+                } else {
+                    subtract_usage(&t, previous_totals.as_ref())
+                }
+            })
+            .or(info.last_token_usage);
         if let Some(t) = totals {
             previous_totals = Some(t);
+        }
+        if !usage_started {
+            continue;
         }
         let Some(usage) = usage else { continue };
         if usage.input_tokens == 0
@@ -213,14 +303,20 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
         // files (e.g. resumed sessions) count once.
         let dedup_key = format!(
             "codex:{}:{}:{}:{}:{}:{}",
-            ts, model, usage.input_tokens, cached, usage.output_tokens, usage.reasoning_output_tokens
+            ts,
+            model,
+            usage.input_tokens,
+            cached,
+            usage.output_tokens,
+            usage.reasoning_output_tokens
         );
         records.push(UsageRecord {
             agent: AGENT.to_string(),
             project: "Codex CLI".to_string(),
-            session_id: session_id.clone(),
+            session_id: session_id.to_string(),
             timestamp_ms: ts,
             model,
+            reasoning_effort: current_effort.clone().unwrap_or_default(),
             input_tokens: fresh_input,
             output_tokens: usage.output_tokens,
             cache_creation_5m: 0,
@@ -247,5 +343,110 @@ fn subtract_usage(total: &RawTokenUsage, previous: Option<&RawTokenUsage>) -> Ra
             .reasoning_output_tokens
             .saturating_sub(prev.reasoning_output_tokens),
         total_tokens: total.total_tokens.saturating_sub(prev.total_tokens),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 子代理只应统计通信边界后的累计增量，不能计入父任务历史快照。
+    #[test]
+    fn subagent_skips_inherited_history_and_duplicate_totals() {
+        let content = r#"
+{"timestamp":"2026-08-18T00:00:00.000Z","type":"session_meta","payload":{"thread_source":"subagent"}}
+{"timestamp":"2026-08-18T00:00:00.001Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-18T00:00:00.002Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
+{"timestamp":"2026-08-18T00:00:00.003Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":220,"cached_input_tokens":180,"output_tokens":20,"reasoning_output_tokens":4,"total_tokens":240},"last_token_usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":130}}}}
+{"timestamp":"2026-08-18T00:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5.6-luna","effort":"high"}}
+{"timestamp":"2026-08-18T00:00:01.001Z","type":"inter_agent_communication_metadata","payload":{}}
+{"timestamp":"2026-08-18T00:00:01.002Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":250,"cached_input_tokens":200,"output_tokens":25,"reasoning_output_tokens":5,"total_tokens":275},"last_token_usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":35}}}}
+{"timestamp":"2026-08-18T00:00:01.003Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":250,"cached_input_tokens":200,"output_tokens":25,"reasoning_output_tokens":5,"total_tokens":275},"last_token_usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":35}}}}
+{"timestamp":"2026-08-18T00:00:01.004Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":290,"cached_input_tokens":230,"output_tokens":33,"reasoning_output_tokens":6,"total_tokens":323},"last_token_usage":{"input_tokens":40,"cached_input_tokens":30,"output_tokens":8,"reasoning_output_tokens":1,"total_tokens":48}}}}
+"#;
+
+        let records = parse_content(content, "subagent-session", false);
+
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|record| record.model == "gpt-5.6-luna"));
+        assert!(records
+            .iter()
+            .all(|record| record.reasoning_effort == "high"));
+        assert_eq!(records[0].input_tokens, 10);
+        assert_eq!(records[0].cache_read_tokens, 20);
+        assert_eq!(records[0].output_tokens, 5);
+        assert_eq!(records[1].input_tokens, 10);
+        assert_eq!(records[1].cache_read_tokens, 30);
+        assert_eq!(records[1].output_tokens, 8);
+    }
+
+    /// 无通信边界的旧版子代理应按普通会话统计，避免全量重扫丢失历史用量。
+    #[test]
+    fn legacy_subagent_without_boundary_keeps_usage() {
+        let content = r#"
+{"timestamp":"2026-08-18T00:00:00.000Z","type":"session_meta","payload":{"thread_source":"subagent"}}
+{"timestamp":"2026-08-18T00:00:00.001Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"medium"}}
+{"timestamp":"2026-08-18T00:00:00.002Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
+{"timestamp":"2026-08-18T00:00:00.003Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":120,"output_tokens":20,"reasoning_output_tokens":4,"total_tokens":170},"last_token_usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":60}}}}
+"#;
+
+        let records = parse_content(content, "legacy-subagent-session", false);
+
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|record| record.model == "gpt-5.6-sol"));
+        assert!(records
+            .iter()
+            .all(|record| record.reasoning_effort == "medium"));
+        assert_eq!(records[0].total_tokens(), 110);
+        assert_eq!(records[1].total_tokens(), 60);
+    }
+
+    /// 普通任务应按累计值差分，并忽略累计值未变化的重复终态事件。
+    #[test]
+    fn regular_session_uses_cumulative_deltas() {
+        let content = r#"
+{"timestamp":"2026-08-18T00:00:00.000Z","type":"session_meta","payload":{"thread_source":"vscode"}}
+{"timestamp":"2026-08-18T00:00:00.001Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-18T00:00:00.002Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
+{"timestamp":"2026-08-18T00:00:00.003Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
+{"timestamp":"2026-08-18T00:00:00.004Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":120,"output_tokens":20,"reasoning_output_tokens":4,"total_tokens":170},"last_token_usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":60}}}}
+"#;
+
+        let records = parse_content(content, "regular-session", false);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].total_tokens(), 110);
+        assert_eq!(records[1].total_tokens(), 60);
+    }
+
+    /// 旧版日志缺少累计值时，仍需兼容 last_token_usage 单次用量。
+    #[test]
+    fn legacy_session_falls_back_to_last_usage() {
+        let content = r#"
+{"timestamp":"2026-08-18T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5"}}
+{"timestamp":"2026-08-18T00:00:00.001Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":30,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":55}}}}
+"#;
+
+        let records = parse_content(content, "legacy-session", false);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].input_tokens, 20);
+        assert_eq!(records[0].cache_read_tokens, 30);
+        assert_eq!(records[0].output_tokens, 5);
+    }
+
+    /// 协作模式内的 reasoning_effort 应作为旧日志结构的兼容来源。
+    #[test]
+    fn effort_falls_back_to_collaboration_settings() {
+        let content = r#"
+{"timestamp":"2026-08-18T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}
+{"timestamp":"2026-08-18T00:00:00.001Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":30,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":55}}}}
+"#;
+
+        let records = parse_content(content, "fallback-effort-session", false);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].model, "gpt-5.6-sol");
+        assert_eq!(records[0].reasoning_effort, "xhigh");
     }
 }

@@ -353,6 +353,7 @@ fn build_candidate(
             session_id,
             timestamp_ms: ts,
             model,
+            reasoning_effort: String::new(),
             input_tokens: input,
             output_tokens: output,
             cache_creation_5m: cache_creation,

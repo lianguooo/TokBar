@@ -100,6 +100,7 @@ fn build_record(
         session_id: session_id.to_string(),
         timestamp_ms: ts,
         model: model.to_string(),
+        reasoning_effort: String::new(),
         input_tokens: input,
         output_tokens: output,
         cache_creation_5m: 0,

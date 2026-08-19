@@ -35,6 +35,14 @@ const AGENT_BADGE: Record<string, "warning" | "success" | "info"> = {
   kimi: "info",
 };
 
+/** 仅调整 rollout 文件名的时间分隔符，保留真实会话 ID 用于查询。 */
+function formatSessionId(sessionId: string): string {
+  return sessionId.replace(
+    /^(rollout-\d{4}-\d{2}-\d{2}T)(\d{2})-(\d{2})-(\d{2})/,
+    "$1$2:$3:$4",
+  );
+}
+
 export function SessionsPage({
   params,
   refreshKey,
@@ -231,7 +239,7 @@ function SessionRowGroup({
           <div className="max-w-56">
             <div className="truncate font-medium">{s.project}</div>
             <div className="truncate font-mono text-xs text-muted-foreground">
-              {s.sessionId}
+              {formatSessionId(s.sessionId)}
             </div>
           </div>
         </TableCell>

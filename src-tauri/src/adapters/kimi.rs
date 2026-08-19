@@ -135,6 +135,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             session_id: session_id.clone(),
             timestamp_ms: ts,
             model: "kimi-for-coding".to_string(),
+            reasoning_effort: String::new(),
             input_tokens: usage.input_other,
             output_tokens: usage.output,
             cache_creation_5m: usage.input_cache_creation,

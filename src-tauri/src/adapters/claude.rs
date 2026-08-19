@@ -171,6 +171,7 @@ pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
             session_id: raw.session_id.clone().unwrap_or_else(|| session_id.clone()),
             timestamp_ms: ts,
             model,
+            reasoning_effort: String::new(),
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             cache_creation_5m: cache_5m,

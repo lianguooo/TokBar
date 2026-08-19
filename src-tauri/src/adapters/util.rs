@@ -9,7 +9,9 @@ use serde_json::Value;
 pub fn env_dirs(var: &str, default_rel: &str) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(raw) = std::env::var(var) {
-        for part in raw.split([',', ':']) {
+        // Windows 绝对路径含冒号（如 C:\...），仅用逗号分割；
+        // Unix 上逗号和冒号均可做分隔符（PATH 风格）。
+        for part in split_path_list(&raw) {
             let part = part.trim();
             if !part.is_empty() {
                 dirs.push(PathBuf::from(part));
@@ -25,6 +27,15 @@ pub fn env_dirs(var: &str, default_rel: &str) -> Vec<PathBuf> {
     dirs.dedup();
     dirs.retain(|p| p.is_dir());
     dirs
+}
+
+/// 平台感知的路径列表分割：Unix 支持 ',' 和 ':'，Windows 仅支持 ','。
+fn split_path_list(raw: &str) -> Vec<&str> {
+    if cfg!(windows) {
+        raw.split(',').collect()
+    } else {
+        raw.split([',', ':']).collect()
+    }
 }
 
 /// Recursively collect files whose extension matches one of `exts`.

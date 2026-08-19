@@ -13,7 +13,7 @@ use crate::pricing::{ModelPricing, PricingMap};
 use crate::types::UsageRecord;
 
 /// Bump when parsing/pricing semantics change so cached entries rebuild.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 5;
 
 pub fn open(db_path: &Path) -> Result<Connection, String> {
     if let Some(parent) = db_path.parent() {
@@ -39,6 +39,7 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
            timestamp_ms INTEGER NOT NULL,
            date_local TEXT NOT NULL,
            model TEXT NOT NULL,
+           reasoning_effort TEXT NOT NULL DEFAULT '',
            input_tokens INTEGER NOT NULL,
            output_tokens INTEGER NOT NULL,
            cache_creation_5m INTEGER NOT NULL,
@@ -54,6 +55,24 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
          CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(agent, session_id);",
     )
     .map_err(|e| e.to_string())?;
+
+    // 旧数据库建表语句不会自动补列，先迁移字段再触发版本重扫。
+    let has_reasoning_effort = conn
+        .prepare("PRAGMA table_info(entries)")
+        .and_then(|mut stmt| {
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            Ok(columns
+                .filter_map(Result::ok)
+                .any(|name| name == "reasoning_effort"))
+        })
+        .map_err(|e| e.to_string())?;
+    if !has_reasoning_effort {
+        conn.execute(
+            "ALTER TABLE entries ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -258,11 +277,12 @@ fn insert_record(
         .execute(
             "INSERT INTO entries (
                dedup_key, file_path, agent, project, session_id, timestamp_ms, date_local,
-               model, input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
+               model, reasoning_effort, input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
                cache_read_tokens, total_tokens, cost_usd, calculated_cost
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
              ON CONFLICT(dedup_key) DO UPDATE SET
                file_path = excluded.file_path,
+               reasoning_effort = excluded.reasoning_effort,
                input_tokens = excluded.input_tokens,
                output_tokens = excluded.output_tokens,
                cache_creation_5m = excluded.cache_creation_5m,
@@ -281,6 +301,7 @@ fn insert_record(
                 rec.timestamp_ms,
                 date_local,
                 rec.model,
+                rec.reasoning_effort,
                 rec.input_tokens as i64,
                 rec.output_tokens as i64,
                 rec.cache_creation_5m as i64,
