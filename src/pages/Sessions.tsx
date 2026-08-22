@@ -161,6 +161,9 @@ export function SessionsPage({
             </div>
           </div>
         </div>
+        <p className="text-xs text-muted-foreground">
+          {t("sessions.retentionHint")}
+        </p>
       </CardHeader>
       <CardContent className="p-0">
         <Table>

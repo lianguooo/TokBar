@@ -90,6 +90,8 @@ const en = {
   "sessions.empty": "No sessions in this period",
   "sessions.search": "Search project / session / model…",
   "sessions.allAgents": "All",
+  "sessions.retentionHint":
+    "Session details are kept for 30 days. Older token and cost history remains available in Trends.",
 
   // Models
   "models.costDist": "Cost Distribution",
@@ -132,6 +134,30 @@ const en = {
   "settings.files": "{n} files",
   "settings.lastScan":
     "Last scan: {parsed} of {total} files re-parsed, {entries} entries updated in {ms} ms.",
+  "settings.retention": "Data Retention",
+  "settings.retentionDesc":
+    "Remove Claude Code and Codex session logs whose last activity was over 30 days ago. Daily token and cost history is archived first.",
+  "settings.retentionPolicy": "Full session details: 30 days",
+  "settings.retentionPreview": "Preview cleanup",
+  "settings.retentionPreviewing": "Checking…",
+  "settings.retentionSummary": "{sessions} sessions · {files} files · {size}",
+  "settings.retentionPreserve":
+    "TokBar will preserve {tokens} tokens and {cost} in daily usage history.",
+  "settings.retentionSkipped":
+    "{n} older sessions use shared or unsupported sources and will be skipped.",
+  "settings.retentionEmpty": "No supported sessions older than 30 days.",
+  "settings.retentionDelete": "Delete old sessions",
+  "settings.retentionConfirmTitle": "Delete original session logs?",
+  "settings.retentionConfirmDesc":
+    "The conversations will no longer be available in Claude Code or Codex. Token and cost history will remain in TokBar.",
+  "settings.retentionCancel": "Cancel",
+  "settings.retentionConfirm": "Delete permanently",
+  "settings.retentionDeleting": "Archiving and deleting…",
+  "settings.retentionSuccess":
+    "Archived {sessions} sessions and deleted {files} source files.",
+  "settings.retentionPending":
+    "Usage was archived, but {n} changed or locked files could not be deleted.",
+  "settings.retentionFailed": "Cleanup failed: {error}",
   "settings.costMode": "Cost Mode",
   "settings.mode.auto": "Auto",
   "settings.mode.autoDesc":
@@ -146,7 +172,8 @@ const en = {
     "Cost is calculated from LiteLLM's community model pricing database. Rates refresh automatically once a day (checked at launch). New rates apply to new usage going forward — historical costs keep the rates in effect when they were recorded.",
   "settings.pricingRefresh": "Update pricing now",
   "settings.pricingRefreshing": "Updating…",
-  "settings.pricingRefreshed": "Updated — {count} models, all usage re-priced.",
+  "settings.pricingRefreshed":
+    "Updated — {count} models; active usage re-priced, archived history unchanged.",
   "settings.pricingRefreshFailed": "Update failed: {error}",
 
   // Quick panel (menu bar popover)
@@ -268,6 +295,8 @@ const zh: Record<keyof typeof en, string> = {
   "sessions.empty": "该时间段内暂无会话",
   "sessions.search": "搜索项目 / 会话 / 模型…",
   "sessions.allAgents": "全部",
+  "sessions.retentionHint":
+    "会话详情保留 30 天；更早的 Token 与金额历史仍可在趋势页查看。",
 
   "models.costDist": "成本分布",
   "models.tokenDist": "Token 分布",
@@ -306,6 +335,29 @@ const zh: Record<keyof typeof en, string> = {
   "settings.files": "{n} 个文件",
   "settings.lastScan":
     "上次扫描:重新解析 {parsed}/{total} 个文件,更新 {entries} 条记录,耗时 {ms} 毫秒。",
+  "settings.retention": "数据保留",
+  "settings.retentionDesc":
+    "删除最后活动时间超过 30 天的 Claude Code 和 Codex 会话日志，删除前会先归档每日 Token 与金额。",
+  "settings.retentionPolicy": "完整会话详情：保留 30 天",
+  "settings.retentionPreview": "预览可清理内容",
+  "settings.retentionPreviewing": "正在检查…",
+  "settings.retentionSummary": "{sessions} 个会话 · {files} 个文件 · {size}",
+  "settings.retentionPreserve":
+    "TokBar 将在每日用量历史中保留 {tokens} Token 和 {cost}。",
+  "settings.retentionSkipped":
+    "另有 {n} 个旧会话来自共享或暂不支持的数据源，本次会跳过。",
+  "settings.retentionEmpty": "当前没有超过 30 天且支持清理的会话。",
+  "settings.retentionDelete": "删除旧会话",
+  "settings.retentionConfirmTitle": "确定删除原始会话日志？",
+  "settings.retentionConfirmDesc":
+    "删除后将无法在 Claude Code 或 Codex 中查看这些对话，但 TokBar 会继续保留 Token 与金额历史。",
+  "settings.retentionCancel": "取消",
+  "settings.retentionConfirm": "永久删除",
+  "settings.retentionDeleting": "正在归档并删除…",
+  "settings.retentionSuccess": "已归档 {sessions} 个会话并删除 {files} 个源文件。",
+  "settings.retentionPending":
+    "用量已归档，但仍有 {n} 个已变化或被占用的文件无法删除。",
+  "settings.retentionFailed": "清理失败：{error}",
   "settings.costMode": "成本模式",
   "settings.mode.auto": "自动",
   "settings.mode.autoDesc":
@@ -319,7 +371,8 @@ const zh: Record<keyof typeof en, string> = {
     "成本基于 LiteLLM 社区模型价格库计算。价格每天自动更新一次(启动时检查),新价格只用于之后的新增用量 —— 历史成本保持记录时的价格不变。",
   "settings.pricingRefresh": "立即更新价格",
   "settings.pricingRefreshing": "更新中…",
-  "settings.pricingRefreshed": "已更新 —— 共 {count} 个模型,全部用量已重新计价。",
+  "settings.pricingRefreshed":
+    "已更新 —— 共 {count} 个模型；近 30 天用量已重新计价，归档历史保持不变。",
   "settings.pricingRefreshFailed": "更新失败:{error}",
 
   "quick.todayCost": "今日成本",

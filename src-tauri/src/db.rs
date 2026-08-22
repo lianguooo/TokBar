@@ -62,6 +62,49 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
          CREATE TABLE IF NOT EXISTS codex_tier_history (
            observed_at_ms INTEGER NOT NULL,
            fast INTEGER NOT NULL
+         );
+         -- Cold, session-free usage facts retained after old source logs
+         -- are removed. One source hash makes repeated cleanup idempotent
+         -- without retaining a recoverable session id or source path.
+         CREATE TABLE IF NOT EXISTS usage_archive (
+           source_key TEXT NOT NULL,
+           date_local TEXT NOT NULL,
+           agent TEXT NOT NULL,
+           model TEXT NOT NULL,
+           input_tokens INTEGER NOT NULL,
+           output_tokens INTEGER NOT NULL,
+           cache_creation_5m INTEGER NOT NULL,
+           cache_creation_1h INTEGER NOT NULL,
+           cache_read_tokens INTEGER NOT NULL,
+           total_tokens INTEGER NOT NULL,
+           requests INTEGER NOT NULL,
+           cost_auto REAL NOT NULL,
+           cost_calculate REAL NOT NULL,
+           cost_display REAL NOT NULL,
+           archived_at_ms INTEGER NOT NULL,
+           PRIMARY KEY (source_key, date_local, agent, model)
+         );
+         CREATE INDEX IF NOT EXISTS idx_usage_archive_date ON usage_archive(date_local);
+         CREATE INDEX IF NOT EXISTS idx_usage_archive_model ON usage_archive(model);
+         -- Scanner-side boundary for a source path that has been archived.
+         -- If an application appends new records to the same path, only
+         -- records after archived_through_ms are imported.
+         CREATE TABLE IF NOT EXISTS retention_tombstones (
+           source_key TEXT PRIMARY KEY,
+           agent TEXT NOT NULL,
+           archived_through_ms INTEGER NOT NULL,
+           purged_at_ms INTEGER NOT NULL
+         );
+         -- A committed archive must survive a process exit before the source
+         -- file is unlinked. Pending rows are retried on launch/next cleanup.
+         CREATE TABLE IF NOT EXISTS retention_pending_files (
+           source_key TEXT PRIMARY KEY,
+           agent TEXT NOT NULL,
+           original_path TEXT NOT NULL,
+           original_mtime_ms INTEGER NOT NULL,
+           original_size INTEGER NOT NULL,
+           created_at_ms INTEGER NOT NULL,
+           last_error TEXT NOT NULL DEFAULT ''
          );",
     )
     .map_err(|e| e.to_string())?;
@@ -110,6 +153,18 @@ pub fn open(db_path: &Path) -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     }
     Ok(conn)
+}
+
+/// Stable, non-reversible-enough key used to connect an archived source to
+/// its scanner tombstone without retaining the original path in cold data.
+/// FNV-1a keeps this deterministic across builds without another dependency.
+pub fn source_key(agent: &str, path: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in agent.bytes().chain(std::iter::once(0)).chain(path.bytes()) {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -254,7 +309,7 @@ pub fn scan_all(
     // Phase B (short lock): load the cached scan state in one query
     // (instead of one SELECT per file), diff, drop deleted files, and
     // sample the current Codex service tier onto its timeline.
-    let (changed, tier_axis): (Vec<usize>, TierAxis) = {
+    let (changed, tier_axis, tombstones): (Vec<usize>, TierAxis, HashMap<String, i64>) = {
         let mut guard = conn.lock().map_err(|e| e.to_string())?;
         let known: HashMap<String, (i64, i64)> = {
             let mut stmt = guard
@@ -264,6 +319,15 @@ pub fn scan_all(
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, (row.get(1)?, row.get(2)?)))
                 })
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(Result::ok).collect()
+        };
+        let tombstones: HashMap<String, i64> = {
+            let mut stmt = guard
+                .prepare("SELECT source_key, archived_through_ms FROM retention_tombstones")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
                 .map_err(|e| e.to_string())?;
             rows.filter_map(Result::ok).collect()
         };
@@ -280,7 +344,7 @@ pub fn scan_all(
             stats.files_removed = deleted.len();
         }
         let tier_axis = observe_codex_tier(&guard)?;
-        (changed, tier_axis)
+        (changed, tier_axis, tombstones)
     };
 
     // Phases C+D, chunked: parse a batch of files without the lock
@@ -298,8 +362,12 @@ pub fn scan_all(
             let records = adapters::by_agent(fm.agent)
                 .map(|a| (a.parse_file)(&fm.file))
                 .unwrap_or_default();
+            let archived_through = tombstones
+                .get(&source_key(fm.agent, &fm.path))
+                .copied();
             let priced = records
                 .into_iter()
+                .filter(|rec| archived_through.is_none_or(|through| rec.timestamp_ms > through))
                 .map(|rec| {
                     // Codex has no per-event tier; price by the tier active at
                     // the request's timestamp. The "-fast" suffix routes

@@ -3,6 +3,7 @@ pub mod aggregate;
 pub mod cost;
 pub mod db;
 pub mod pricing;
+pub mod retention;
 pub mod types;
 
 use std::path::PathBuf;
@@ -204,6 +205,38 @@ fn get_tray_mode(state: tauri::State<AppState>) -> String {
         .lock()
         .map(|s| s.tray_mode.clone())
         .unwrap_or_else(|_| "cost".to_string())
+}
+
+#[tauri::command]
+fn preview_retention(
+    state: tauri::State<AppState>,
+) -> Result<retention::RetentionPreview, String> {
+    let _scan_guard = state.scan_lock.lock().map_err(|e| e.to_string())?;
+    {
+        let pricing = state.pricing.lock().map_err(|e| e.to_string())?;
+        db::scan_all(&state.conn, &pricing, |_, _| {})?;
+    }
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    retention::preview(&conn, retention::DEFAULT_RETENTION_DAYS)
+}
+
+#[tauri::command]
+fn cleanup_old_sessions(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<retention::RetentionResult, String> {
+    let result = {
+        let _scan_guard = state.scan_lock.lock().map_err(|e| e.to_string())?;
+        {
+            let pricing = state.pricing.lock().map_err(|e| e.to_string())?;
+            db::scan_all(&state.conn, &pricing, |_, _| {})?;
+        }
+        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+        retention::cleanup(&mut conn, retention::DEFAULT_RETENTION_DAYS)?
+    };
+    update_tray_title(&app, &state);
+    let _ = app.emit("usage-updated", ());
+    Ok(result)
 }
 
 /// Watch all agent log directories and rescan automatically (debounced)
@@ -507,6 +540,7 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
             let conn = db::open(&data_dir.join("tokbar.db")).expect("failed to open database");
+            let _ = retention::retry_pending_deletions(&conn);
             let pricing = PricingMap::load(Some(data_dir.clone()));
             let settings = load_settings(&data_dir);
             app.manage(AppState {
@@ -540,6 +574,8 @@ pub fn run() {
             show_main_window,
             set_tray_mode,
             get_tray_mode,
+            preview_retention,
+            cleanup_old_sessions,
             get_session_models,
             get_overview,
             get_daily,

@@ -1,4 +1,4 @@
-use chrono::TimeZone;
+use chrono::{Local, TimeZone};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -15,6 +15,14 @@ fn cost_expr(mode: CostMode) -> &'static str {
     }
 }
 
+fn archive_cost_expr(mode: CostMode) -> &'static str {
+    match mode {
+        CostMode::Auto => "cost_auto",
+        CostMode::Calculate => "cost_calculate",
+        CostMode::Display => "cost_display",
+    }
+}
+
 fn range_clause(since_ms: Option<i64>, until_ms: Option<i64>) -> String {
     let mut clause = String::from("1=1");
     if let Some(s) = since_ms {
@@ -22,6 +30,19 @@ fn range_clause(since_ms: Option<i64>, until_ms: Option<i64>) -> String {
     }
     if let Some(u) = until_ms {
         clause.push_str(&format!(" AND timestamp_ms < {u}"));
+    }
+    clause
+}
+
+/// Archived usage is intentionally day-granular. App ranges are aligned to
+/// local day boundaries; an exclusive `until` therefore maps to `< YYYY-MM-DD`.
+fn archive_range_clause(since_ms: Option<i64>, until_ms: Option<i64>) -> String {
+    let mut clause = String::from("1=1");
+    if let Some(s) = since_ms.and_then(|ms| Local.timestamp_millis_opt(ms).single()) {
+        clause.push_str(&format!(" AND date_local >= '{}'", s.format("%Y-%m-%d")));
+    }
+    if let Some(u) = until_ms.and_then(|ms| Local.timestamp_millis_opt(ms).single()) {
+        clause.push_str(&format!(" AND date_local < '{}'", u.format("%Y-%m-%d")));
     }
     clause
 }
@@ -64,8 +85,10 @@ pub fn overview(
     mode: CostMode,
 ) -> Result<Overview, String> {
     let cost = cost_expr(mode);
+    let archive_cost = archive_cost_expr(mode);
     let range = range_clause(since_ms, until_ms);
-    let totals = conn
+    let archive_range = archive_range_clause(since_ms, until_ms);
+    let mut totals = conn
         .query_row(
             &format!(
                 "SELECT COALESCE(SUM({cost}),0), COALESCE(SUM(input_tokens),0),
@@ -93,11 +116,65 @@ pub fn overview(
         )
         .map_err(|e| e.to_string())?;
 
+    let archived: (f64, i64, i64, i64, i64, i64, i64) = conn
+        .query_row(
+            &format!(
+                "SELECT COALESCE(SUM({archive_cost}),0), COALESCE(SUM(input_tokens),0),
+                        COALESCE(SUM(output_tokens),0),
+                        COALESCE(SUM(cache_creation_5m + cache_creation_1h),0),
+                        COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(total_tokens),0),
+                        COALESCE(SUM(requests),0)
+                 FROM usage_archive WHERE {archive_range}"
+            ),
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    totals.cost += archived.0;
+    totals.input_tokens += archived.1;
+    totals.output_tokens += archived.2;
+    totals.cache_creation_tokens += archived.3;
+    totals.cache_read_tokens += archived.4;
+    totals.total_tokens += archived.5;
+    totals.requests += archived.6;
+    totals.active_days = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM (
+                   SELECT date_local FROM entries WHERE {range}
+                   UNION
+                   SELECT date_local FROM usage_archive WHERE {archive_range}
+                 )"
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT agent, COALESCE(SUM({cost}),0), COALESCE(SUM(total_tokens),0), COUNT(*),
-                    COUNT(DISTINCT session_id)
-             FROM entries WHERE {range} GROUP BY agent ORDER BY 2 DESC"
+            "WITH combined AS (
+               SELECT agent, COALESCE(SUM({cost}),0) AS cost,
+                      COALESCE(SUM(total_tokens),0) AS total_tokens,
+                      COUNT(*) AS requests, COUNT(DISTINCT session_id) AS sessions
+               FROM entries WHERE {range} GROUP BY agent
+               UNION ALL
+               SELECT agent, COALESCE(SUM({archive_cost}),0),
+                      COALESCE(SUM(total_tokens),0), COALESCE(SUM(requests),0), 0
+               FROM usage_archive WHERE {archive_range} GROUP BY agent
+             )
+             SELECT agent, SUM(cost), SUM(total_tokens), SUM(requests), SUM(sessions)
+             FROM combined GROUP BY agent ORDER BY 2 DESC"
         ))
         .map_err(|e| e.to_string())?;
     let by_agent = stmt
@@ -138,15 +215,28 @@ pub fn daily(
     mode: CostMode,
 ) -> Result<Vec<DailyRow>, String> {
     let cost = cost_expr(mode);
+    let archive_cost = archive_cost_expr(mode);
     let range = range_clause(since_ms, until_ms);
+    let archive_range = archive_range_clause(since_ms, until_ms);
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT date_local, agent, COALESCE(SUM({cost}),0),
+            "WITH combined AS (
+               SELECT date_local, agent, {cost} AS cost,
+                      input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
+                      cache_read_tokens, total_tokens, 1 AS requests
+               FROM entries WHERE {range}
+               UNION ALL
+               SELECT date_local, agent, {archive_cost},
+                      input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
+                      cache_read_tokens, total_tokens, requests
+               FROM usage_archive WHERE {archive_range}
+             )
+             SELECT date_local, agent, COALESCE(SUM(cost),0),
                     COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
                     COALESCE(SUM(cache_creation_5m + cache_creation_1h),0),
-                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(total_tokens),0), COUNT(*)
-             FROM entries WHERE {range}
-             GROUP BY date_local, agent ORDER BY date_local ASC"
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(total_tokens),0),
+                    COALESCE(SUM(requests),0)
+             FROM combined GROUP BY date_local, agent ORDER BY date_local ASC"
         ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -230,14 +320,28 @@ pub fn models(
     mode: CostMode,
 ) -> Result<Vec<ModelRow>, String> {
     let cost = cost_expr(mode);
+    let archive_cost = archive_cost_expr(mode);
     let range = range_clause(since_ms, until_ms);
+    let archive_range = archive_range_clause(since_ms, until_ms);
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT model, COALESCE(SUM({cost}),0),
-                    COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+            "WITH combined AS (
+               SELECT model, {cost} AS cost, input_tokens, output_tokens,
+                      cache_creation_5m, cache_creation_1h, cache_read_tokens,
+                      total_tokens, 1 AS requests
+               FROM entries WHERE {range}
+               UNION ALL
+               SELECT model, {archive_cost}, input_tokens, output_tokens,
+                      cache_creation_5m, cache_creation_1h, cache_read_tokens,
+                      total_tokens, requests
+               FROM usage_archive WHERE {archive_range}
+             )
+             SELECT model, COALESCE(SUM(cost),0), COALESCE(SUM(input_tokens),0),
+                    COALESCE(SUM(output_tokens),0),
                     COALESCE(SUM(cache_creation_5m + cache_creation_1h),0),
-                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(total_tokens),0), COUNT(*)
-             FROM entries WHERE {range} GROUP BY model ORDER BY 2 DESC"
+                    COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(total_tokens),0),
+                    COALESCE(SUM(requests),0)
+             FROM combined GROUP BY model ORDER BY 2 DESC"
         ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -532,4 +636,85 @@ pub fn blocks(
     }
     blocks.reverse(); // most recent first
     Ok(blocks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn analytics_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE entries (
+               agent TEXT NOT NULL, session_id TEXT NOT NULL, project TEXT NOT NULL,
+               title TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, date_local TEXT NOT NULL,
+               model TEXT NOT NULL, reasoning_effort TEXT NOT NULL,
+               input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+               cache_creation_5m INTEGER NOT NULL, cache_creation_1h INTEGER NOT NULL,
+               cache_read_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL,
+               cost_usd REAL, calculated_cost REAL NOT NULL
+             );
+             CREATE TABLE usage_archive (
+               source_key TEXT NOT NULL, date_local TEXT NOT NULL, agent TEXT NOT NULL,
+               model TEXT NOT NULL, input_tokens INTEGER NOT NULL,
+               output_tokens INTEGER NOT NULL, cache_creation_5m INTEGER NOT NULL,
+               cache_creation_1h INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+               total_tokens INTEGER NOT NULL, requests INTEGER NOT NULL,
+               cost_auto REAL NOT NULL, cost_calculate REAL NOT NULL,
+               cost_display REAL NOT NULL, archived_at_ms INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO entries VALUES
+             ('codex','live-session','project','title',2000,'2026-08-20','gpt-live','',
+              10,20,3,4,5,42,2.0,3.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO usage_archive VALUES
+             ('old-source','2026-07-01','claude-code','claude-old',
+              100,200,30,40,50,420,2,7.0,8.0,6.0,1000)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn daily_combines_live_and_archived_usage() {
+        let rows = daily(&analytics_conn(), None, None, CostMode::Auto).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].date, "2026-07-01");
+        assert_eq!(rows[0].total_tokens, 420);
+        assert_eq!(rows[0].requests, 2);
+        assert_eq!(rows[0].cost, 7.0);
+        assert_eq!(rows[1].total_tokens, 42);
+        assert_eq!(rows[1].cost, 2.0);
+    }
+
+    #[test]
+    fn overview_preserves_cost_modes_and_counts_only_live_sessions() {
+        let conn = analytics_conn();
+        let auto = overview(&conn, None, None, CostMode::Auto).unwrap();
+        let calculate = overview(&conn, None, None, CostMode::Calculate).unwrap();
+        let display = overview(&conn, None, None, CostMode::Display).unwrap();
+        assert_eq!(auto.totals.cost, 9.0);
+        assert_eq!(calculate.totals.cost, 11.0);
+        assert_eq!(display.totals.cost, 8.0);
+        assert_eq!(auto.totals.total_tokens, 462);
+        assert_eq!(auto.totals.requests, 3);
+        assert_eq!(auto.totals.sessions, 1);
+        assert_eq!(auto.totals.active_days, 2);
+    }
+
+    #[test]
+    fn models_keeps_archived_model_breakdown() {
+        let rows = models(&analytics_conn(), None, None, CostMode::Auto).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].model, "claude-old");
+        assert_eq!(rows[0].requests, 2);
+        assert_eq!(rows[1].model, "gpt-live");
+    }
 }

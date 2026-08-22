@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import {
+  AlertTriangle,
+  Archive,
   ChevronDown,
   CreditCard,
   Database,
   DollarSign,
   FolderSearch,
   Languages,
+  LoaderCircle,
   MenuSquare,
   Palette,
   Rocket,
@@ -16,10 +19,13 @@ import {
   IN_TAURI,
   api,
   type CostMode,
+  type RetentionPreview,
+  type RetentionResult,
   type ScanStats,
   type SourceInfo,
 } from "@/lib/api";
 import { agentLabel } from "@/lib/format";
+import { formatCost, formatTokens } from "@/lib/format";
 import { useI18n, type I18nKey, type Lang } from "@/lib/i18n";
 import { useSubscriptions } from "@/lib/subscriptions";
 import { AgentMultiSelect } from "@/components/AgentMultiSelect";
@@ -30,6 +36,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 type TrayMode = "cost" | "tokens" | "off";
+type RetentionStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "confirming"
+  | "running"
+  | "success"
+  | "error";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
 
 const SUB_PRESETS: { name: string; monthlyUsd: number; agents: string[] }[] = [
   { name: "Claude Pro", monthlyUsd: 20, agents: ["claude-code"] },
@@ -65,6 +86,41 @@ export function SettingsPage({
     ok: boolean;
     text: string;
   } | null>(null);
+  const [retentionStatus, setRetentionStatus] =
+    useState<RetentionStatus>("idle");
+  const [retentionPreview, setRetentionPreview] =
+    useState<RetentionPreview | null>(null);
+  const [retentionResult, setRetentionResult] =
+    useState<RetentionResult | null>(null);
+  const [retentionError, setRetentionError] = useState("");
+
+  const previewRetention = async () => {
+    setRetentionStatus("loading");
+    setRetentionError("");
+    setRetentionResult(null);
+    try {
+      const preview = await api.previewRetention();
+      setRetentionPreview(preview);
+      setRetentionStatus("ready");
+    } catch (error) {
+      setRetentionError(String(error));
+      setRetentionStatus("error");
+    }
+  };
+
+  const cleanupRetention = async () => {
+    setRetentionStatus("running");
+    setRetentionError("");
+    try {
+      const result = await api.cleanupOldSessions();
+      setRetentionResult(result);
+      setRetentionPreview(null);
+      setRetentionStatus("success");
+    } catch (error) {
+      setRetentionError(String(error));
+      setRetentionStatus("error");
+    }
+  };
 
   const refreshPricing = async () => {
     setPricingBusy(true);
@@ -570,6 +626,158 @@ export function SettingsPage({
               >
                 {pricingMsg.text}
               </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex-row items-center gap-2 space-y-0">
+          <Archive className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <CardTitle>{t("settings.retention")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">
+                {t("settings.retentionPolicy")}
+              </div>
+              <p className="max-w-xl text-xs leading-relaxed text-muted-foreground">
+                {t("settings.retentionDesc")}
+              </p>
+            </div>
+            <button
+              onClick={previewRetention}
+              disabled={retentionStatus === "loading" || retentionStatus === "running"}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-border px-4 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {retentionStatus === "loading" && (
+                <LoaderCircle
+                  className="h-4 w-4 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              )}
+              {t(
+                retentionStatus === "loading"
+                  ? "settings.retentionPreviewing"
+                  : "settings.retentionPreview",
+              )}
+            </button>
+          </div>
+
+          <div aria-live="polite">
+            {retentionPreview && retentionStatus !== "success" && (
+              <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+                {retentionPreview.files > 0 ? (
+                  <>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <div className="text-sm font-semibold">
+                        {t("settings.retentionSummary", {
+                          sessions: retentionPreview.sessions,
+                          files: retentionPreview.files,
+                          size: formatBytes(retentionPreview.bytes),
+                        })}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(retentionPreview.cutoffMs).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t("settings.retentionPreserve", {
+                        tokens: formatTokens(retentionPreview.totalTokens),
+                        cost: formatCost(retentionPreview.totalCost),
+                      })}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {retentionPreview.sources.map((source) => (
+                        <Badge key={source.agent} variant="outline">
+                          {agentLabel(source.agent)} · {source.sessions}
+                        </Badge>
+                      ))}
+                    </div>
+                    {retentionPreview.skippedSessions > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {t("settings.retentionSkipped", {
+                          n: retentionPreview.skippedSessions,
+                        })}
+                      </p>
+                    )}
+                    {retentionStatus === "confirming" ? (
+                      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                        <div className="flex gap-2">
+                          <AlertTriangle
+                            className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
+                            aria-hidden="true"
+                          />
+                          <div>
+                            <div className="text-sm font-semibold text-destructive">
+                              {t("settings.retentionConfirmTitle")}
+                            </div>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                              {t("settings.retentionConfirmDesc")}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap justify-end gap-2">
+                          <button
+                            onClick={() => setRetentionStatus("ready")}
+                            className="min-h-11 rounded-lg border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
+                          >
+                            {t("settings.retentionCancel")}
+                          </button>
+                          <button
+                            onClick={cleanupRetention}
+                            className="min-h-11 rounded-lg bg-destructive px-4 text-sm font-semibold text-destructive-foreground transition-opacity hover:opacity-90"
+                          >
+                            {t("settings.retentionConfirm")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : retentionStatus === "running" ? (
+                      <div className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
+                        <LoaderCircle
+                          className="h-4 w-4 animate-spin motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
+                        {t("settings.retentionDeleting")}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRetentionStatus("confirming")}
+                        className="min-h-11 rounded-lg border border-destructive/50 px-4 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                      >
+                        {t("settings.retentionDelete")}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings.retentionEmpty")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {retentionStatus === "success" && retentionResult && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-600 dark:text-emerald-400">
+                {t("settings.retentionSuccess", {
+                  sessions: retentionResult.preview.sessions,
+                  files: retentionResult.deletedFiles,
+                })}
+                {retentionResult.pendingFiles > 0 && (
+                  <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                    {t("settings.retentionPending", {
+                      n: retentionResult.pendingFiles,
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {retentionStatus === "error" && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {t("settings.retentionFailed", { error: retentionError })}
+              </div>
             )}
           </div>
         </CardContent>

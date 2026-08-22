@@ -9,6 +9,8 @@ import type {
   ModelRow,
   Overview,
   ProjectRow,
+  RetentionPreview,
+  RetentionResult,
   ScanStats,
   SessionRow,
   SourceInfo,
@@ -340,6 +342,51 @@ function sources(): SourceInfo[] {
 }
 
 let trayMode = "cost";
+let retentionCleaned = false;
+
+function retentionPreview(): RetentionPreview {
+  if (retentionCleaned) {
+    return {
+      retentionDays: 30,
+      cutoffMs: Date.now() - 30 * DAY,
+      sessions: 0,
+      files: 0,
+      bytes: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      skippedSessions: 18,
+      sources: [],
+    };
+  }
+  return {
+    retentionDays: 30,
+    cutoffMs: Date.now() - 30 * DAY,
+    sessions: 84,
+    files: 84,
+    bytes: 186_646_528,
+    totalTokens: 43_820_000,
+    totalCost: 286.47,
+    skippedSessions: 18,
+    sources: [
+      {
+        agent: "claude-code",
+        sessions: 57,
+        files: 57,
+        bytes: 139_460_608,
+        totalTokens: 31_240_000,
+        totalCost: 224.31,
+      },
+      {
+        agent: "codex",
+        sessions: 27,
+        files: 27,
+        bytes: 47_185_920,
+        totalTokens: 12_580_000,
+        totalCost: 62.16,
+      },
+    ],
+  };
+}
 
 export async function mockInvoke<T>(
   cmd: string,
@@ -374,6 +421,18 @@ export async function mockInvoke<T>(
       return blocks() as T;
     case "get_sources":
       return sources() as T;
+    case "preview_retention":
+      return retentionPreview() as T;
+    case "cleanup_old_sessions": {
+      const preview = retentionPreview();
+      retentionCleaned = true;
+      return {
+        preview,
+        archivedFiles: preview.files,
+        deletedFiles: preview.files,
+        pendingFiles: 0,
+      } satisfies RetentionResult as T;
+    }
     case "get_session_models":
       return models(
         filtered({ sinceMs: Date.now() - 7 * DAY }).filter(

@@ -124,6 +124,34 @@ export interface SourceInfo {
   fileCount: number;
 }
 
+export interface RetentionSourcePreview {
+  agent: string;
+  sessions: number;
+  files: number;
+  bytes: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
+export interface RetentionPreview {
+  retentionDays: number;
+  cutoffMs: number;
+  sessions: number;
+  files: number;
+  bytes: number;
+  totalTokens: number;
+  totalCost: number;
+  skippedSessions: number;
+  sources: RetentionSourcePreview[];
+}
+
+export interface RetentionResult {
+  preview: RetentionPreview;
+  archivedFiles: number;
+  deletedFiles: number;
+  pendingFiles: number;
+}
+
 export interface QueryParams {
   sinceMs?: number;
   untilMs?: number;
@@ -156,6 +184,8 @@ export const api = {
   getBlocks: (p: { sinceMs?: number; costMode?: CostMode }) =>
     call<Block[]>("get_blocks", { ...p }),
   getSources: () => call<SourceInfo[]>("get_sources"),
+  previewRetention: () => call<RetentionPreview>("preview_retention"),
+  cleanupOldSessions: () => call<RetentionResult>("cleanup_old_sessions"),
   getSessionModels: (agent: string, sessionId: string, costMode?: CostMode) =>
     call<ModelRow[]>("get_session_models", { agent, sessionId, costMode }),
   getTrayMode: () => call<string>("get_tray_mode"),
