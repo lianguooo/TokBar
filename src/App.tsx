@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Settings,
   Timer,
+  Wrench,
 } from "lucide-react";
 import {
   api,
@@ -52,8 +53,18 @@ const BlocksPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.SettingsPage })),
 );
+const AdvancedPage = lazy(() =>
+  import("@/pages/Advanced").then((m) => ({ default: m.AdvancedPage })),
+);
 
-type Page = "overview" | "trends" | "sessions" | "models" | "blocks" | "settings";
+type Page =
+  | "overview"
+  | "trends"
+  | "sessions"
+  | "models"
+  | "blocks"
+  | "advanced"
+  | "settings";
 
 const NAV: { id: Page; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
   { id: "overview", labelKey: "nav.overview", icon: LayoutDashboard },
@@ -61,6 +72,7 @@ const NAV: { id: Page; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
   { id: "sessions", labelKey: "nav.sessions", icon: ListTree },
   { id: "models", labelKey: "nav.models", icon: Bot },
   { id: "blocks", labelKey: "nav.blocks", icon: Timer },
+  { id: "advanced", labelKey: "nav.advanced", icon: Wrench },
   { id: "settings", labelKey: "nav.settings", icon: Settings },
 ];
 
@@ -280,36 +292,37 @@ function App() {
 
         <main className="flex-1 overflow-y-auto p-6">
           <Suspense fallback={<Skeleton className="h-80" />}>
-          {page === "overview" && (
-            <OverviewPage
-              params={params}
-              refreshKey={refreshKey}
-              hourly={range === "today"}
-            />
-          )}
-          {page === "trends" && (
-            <TrendsPage
-              params={params}
-              refreshKey={refreshKey}
-              hourly={range === "today"}
-            />
-          )}
-          {page === "sessions" && (
-            <SessionsPage params={params} refreshKey={refreshKey} />
-          )}
-          {page === "models" && (
-            <ModelsPage params={params} refreshKey={refreshKey} />
-          )}
-          {page === "blocks" && (
-            <BlocksPage costMode={costMode} refreshKey={refreshKey} />
-          )}
-          {page === "settings" && (
-            <SettingsPage
-              costMode={costMode}
-              onCostModeChange={setCostMode}
-              lastScan={lastScan}
-            />
-          )}
+            {page === "overview" && (
+              <OverviewPage
+                params={params}
+                refreshKey={refreshKey}
+                hourly={range === "today"}
+              />
+            )}
+            {page === "trends" && (
+              <TrendsPage
+                params={params}
+                refreshKey={refreshKey}
+                hourly={range === "today"}
+              />
+            )}
+            {page === "sessions" && (
+              <SessionsPage params={params} refreshKey={refreshKey} />
+            )}
+            {page === "models" && (
+              <ModelsPage params={params} refreshKey={refreshKey} />
+            )}
+            {page === "blocks" && (
+              <BlocksPage costMode={costMode} refreshKey={refreshKey} />
+            )}
+            {page === "advanced" && <AdvancedPage />}
+            {page === "settings" && (
+              <SettingsPage
+                costMode={costMode}
+                onCostModeChange={setCostMode}
+                lastScan={lastScan}
+              />
+            )}
           </Suspense>
         </main>
       </div>

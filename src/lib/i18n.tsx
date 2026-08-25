@@ -217,6 +217,95 @@ const en = {
   "settings.sub.confirmRemove": "Confirm delete",
   "settings.sub.empty":
     "No subscriptions yet — pick one below to see your ROI on the Overview.",
+
+  // Advanced (opt-in) features
+  "settings.advanced": "Advanced",
+  "settings.advancedDesc":
+    "Off by default. These two write outside TokBar’s own data: one edits your Codex config and login, the other deletes source log files.",
+  "settings.codexSwitch": "Codex account & provider switch",
+  "settings.codexSwitchDesc":
+    "Switch the Codex account and model provider from here. Edits $CODEX_HOME/config.toml and swaps auth.json.",
+  "settings.sessionDelete": "Delete individual sessions",
+  "settings.sessionDeleteDesc":
+    "Adds a delete action to the sessions table. Removes the session’s source log; daily totals are kept.",
+
+  // Codex switch
+  "codexSwitch.title": "Codex Account & Provider",
+  "codexSwitch.home": "Codex home: {path}",
+  "codexSwitch.restartHint": "Changes take effect the next time Codex starts.",
+  "codexSwitch.accounts": "Accounts",
+  "codexSwitch.providers": "Providers",
+  "codexSwitch.official": "Official ChatGPT",
+  "codexSwitch.officialDesc": "Send requests straight to ChatGPT.",
+  "codexSwitch.current": "Current",
+  "codexSwitch.signedIn": "Signed in",
+  "codexSwitch.signedInHint":
+    "Still the signed-in account — selecting a provider only changes where requests go.",
+  "codexSwitch.use": "Use",
+  "codexSwitch.working": "Working…",
+  "codexSwitch.edit": "Edit",
+  "codexSwitch.delete": "Delete",
+  "codexSwitch.confirmDelete": "Confirm delete",
+  "codexSwitch.cancel": "Cancel",
+  "codexSwitch.save": "Save",
+  "codexSwitch.addProvider": "Add provider",
+  "codexSwitch.addAccount": "Add account",
+  "codexSwitch.import": "Import from CodexPlusPlus",
+  "codexSwitch.importHint":
+    "{n} account(s) found in CodexPlusPlus’s store. Importing copies their logins here; ones already saved are skipped.",
+  "codexSwitch.saveCurrent": "Save current account",
+  "codexSwitch.saveCurrentDesc":
+    "A Codex login was found but is not saved yet. Name it so you can switch back to it later.",
+  "codexSwitch.name": "Name",
+  "codexSwitch.baseUrl": "Base URL",
+  "codexSwitch.token": "Bearer token",
+  "codexSwitch.model": "Model",
+  "codexSwitch.modelHint": "Written to the top-level model in config.toml when selected.",
+  "codexSwitch.currentAccountName": "Name for the account being signed out",
+  "codexSwitch.addAccountWarning":
+    "Adding an account signs the current one out: its auth.json is archived here, then removed. Restart Codex, sign in as the new account, and it is picked up automatically.",
+  "codexSwitch.pending": "{name} · waiting for sign-in",
+  "codexSwitch.pendingHint":
+    "Restart Codex and sign in as {name}. This panel adopts it automatically.",
+  "codexSwitch.captured": "Account {name} was signed in and saved",
+  "codexSwitch.noChange": "Already selected — nothing was changed.",
+  "codexSwitch.empty": "No accounts or providers yet.",
+  "codexSwitch.noCodex": "No Codex config found at this path.",
+  "codexSwitch.loadFailed": "Could not read the Codex config",
+
+  // Session delete
+  "sessions.delete": "Delete",
+  "sessions.deleteConfirm": "Delete log?",
+  "sessions.deleteTitle": "Delete this session’s log file?",
+  "sessions.deleteBody":
+    "{size} on disk will be removed. Daily cost and token totals are kept; the conversation itself is gone for good.",
+  "sessions.deleteShared":
+    "Skipped: this log file also holds other sessions, so deleting it would take them too.",
+  "sessions.deleteStale":
+    "Skipped: the log file changed since the last scan. Refresh and try again.",
+  "sessions.deleted": "Deleted — {size} freed",
+  "sessions.deleteFailed": "Delete failed",
+  // Delete button inside Codex itself
+  "settings.codexInject": "Show the delete button inside Codex",
+  "settings.codexInjectDesc":
+    "Adds the same delete action to Codex’s own sidebar. Codex can only be scripted when it is started with a debug port, so turning this on quits a running Codex and reopens it once. After that TokBar never launches Codex on its own — quit it and it stays quit.",
+  "settings.codexInjectMac": "macOS only for now.",
+  "settings.codexInjectAttached": "Attached to Codex · port {port}",
+  "settings.codexInjectWaiting": "Not attached to Codex",
+  "settings.codexInjectNoAutoLaunch":
+    "TokBar will not reopen Codex by itself. Start Codex from here when you want the delete button back.",
+  "settings.codexInjectRelaunch": "Relaunch Codex",
+  "settings.codexInjectApp": "Codex app",
+  "settings.codexInjectAppPlaceholder": "Auto-detected; set a path to override",
+  "settings.codexInjectConflict":
+    "If CodexPlusPlus is installed, quit it first — both use debug port 9229 and would fight over the same Codex window.",
+
+  // Advanced page
+  "nav.advanced": "Advanced",
+  "advanced.desc":
+    "Everything here writes outside TokBar’s own data: two opt-in features that change your Codex config and login, and a sweep that deletes source logs.",
+  "advanced.enable": "Enable",
+  "advanced.retention": "Delete sessions older than 30 days",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -414,6 +503,94 @@ const zh: Record<keyof typeof en, string> = {
   "settings.sub.remove": "删除",
   "settings.sub.confirmRemove": "确认删除",
   "settings.sub.empty": "还没有订阅 —— 在下方选一个即可在总览看到回本情况。",
+
+  // Advanced (opt-in) features
+  "settings.advanced": "高级功能",
+  "settings.advancedDesc":
+    "默认关闭。这两项会写入 TokBar 自身数据以外的位置：一个修改 Codex 配置与登录，一个删除源日志文件。",
+  "settings.codexSwitch": "Codex 账号与供应商切换",
+  "settings.codexSwitchDesc":
+    "在这里切换 Codex 账号和模型供应商。会修改 $CODEX_HOME/config.toml 并替换 auth.json。",
+  "settings.sessionDelete": "删除单条会话",
+  "settings.sessionDeleteDesc":
+    "在会话列表里增加删除操作。会删掉该会话的源日志，每日用量统计保留。",
+
+  // Codex switch
+  "codexSwitch.title": "Codex 账号与供应商",
+  "codexSwitch.home": "Codex 目录：{path}",
+  "codexSwitch.restartHint": "修改在 Codex 下次启动时生效。",
+  "codexSwitch.accounts": "账号",
+  "codexSwitch.providers": "供应商",
+  "codexSwitch.official": "官方 ChatGPT",
+  "codexSwitch.officialDesc": "请求直接发往 ChatGPT。",
+  "codexSwitch.current": "当前",
+  "codexSwitch.signedIn": "已登录",
+  "codexSwitch.signedInHint":
+    "仍是当前登录账号 —— 选供应商只改变请求通道。",
+  "codexSwitch.use": "切换",
+  "codexSwitch.working": "处理中…",
+  "codexSwitch.edit": "编辑",
+  "codexSwitch.delete": "删除",
+  "codexSwitch.confirmDelete": "确认删除",
+  "codexSwitch.cancel": "取消",
+  "codexSwitch.save": "保存",
+  "codexSwitch.addProvider": "添加供应商",
+  "codexSwitch.addAccount": "添加账号",
+  "codexSwitch.import": "从 CodexPlusPlus 导入",
+  "codexSwitch.importHint":
+    "在 CodexPlusPlus 的存储里找到 {n} 个账号。导入会把它们的登录复制过来，已有的会自动跳过。",
+  "codexSwitch.saveCurrent": "收录当前账号",
+  "codexSwitch.saveCurrentDesc":
+    "检测到一个 Codex 登录，但还没收录。给它起个名字，以后才能切回来。",
+  "codexSwitch.name": "名称",
+  "codexSwitch.baseUrl": "Base URL",
+  "codexSwitch.token": "Bearer Token",
+  "codexSwitch.model": "模型",
+  "codexSwitch.modelHint": "切换到该项时写入 config.toml 的顶层 model。",
+  "codexSwitch.currentAccountName": "即将退出的账号名称",
+  "codexSwitch.addAccountWarning":
+    "添加账号会退出当前登录：先把 auth.json 冷备份到本地，再删除它。随后重启 Codex 并登录新账号，这里会自动收录。",
+  "codexSwitch.pending": "{name} · 等待登录",
+  "codexSwitch.pendingHint": "请重启 Codex 并登录 {name}，此处会自动收录。",
+  "codexSwitch.captured": "账号 {name} 已登录并保存",
+  "codexSwitch.noChange": "已经是当前项 —— 未做任何修改。",
+  "codexSwitch.empty": "还没有账号或供应商。",
+  "codexSwitch.noCodex": "该路径下没有找到 Codex 配置。",
+  "codexSwitch.loadFailed": "读取 Codex 配置失败",
+
+  // Session delete
+  "sessions.delete": "删除",
+  "sessions.deleteConfirm": "确认删除？",
+  "sessions.deleteTitle": "删除这条会话的日志文件？",
+  "sessions.deleteBody":
+    "将删除磁盘上的 {size}。每日花费与 Token 统计会保留，但对话内容无法恢复。",
+  "sessions.deleteShared":
+    "已跳过：该日志文件里还有其他会话，删了会一并带走。",
+  "sessions.deleteStale":
+    "已跳过：日志文件在上次扫描后发生了变化，请刷新后重试。",
+  "sessions.deleted": "已删除 —— 释放 {size}",
+  "sessions.deleteFailed": "删除失败",
+  // Delete button inside Codex itself
+  "settings.codexInject": "在 Codex 界面内显示删除按钮",
+  "settings.codexInjectDesc":
+    "在 Codex 自己的侧边栏加上相同的删除操作。Codex 只有带调试端口启动才能被注入，所以打开此项会退出已在运行的 Codex 并重新打开一次。之后 TokBar 不会再自动拉起 Codex —— 你退出它就保持退出。",
+  "settings.codexInjectMac": "目前仅支持 macOS。",
+  "settings.codexInjectAttached": "已接入 Codex · 端口 {port}",
+  "settings.codexInjectWaiting": "未接入 Codex",
+  "settings.codexInjectNoAutoLaunch":
+    "TokBar 不会自动把 Codex 拉回来。需要删除按钮时，从这里启动 Codex。",
+  "settings.codexInjectRelaunch": "重启 Codex",
+  "settings.codexInjectApp": "Codex 应用",
+  "settings.codexInjectAppPlaceholder": "自动检测；填路径可指定",
+  "settings.codexInjectConflict":
+    "如果装了 CodexPlusPlus，请先退出它 —— 两者都用 9229 调试端口，会互抢同一个 Codex 窗口。",
+
+  // Advanced page
+  "nav.advanced": "高级",
+  "advanced.desc":
+    "这里的功能都会写入 TokBar 自身数据以外的位置：两项需手动开启的功能会改动 Codex 配置与登录，另一项会删除源日志。",
+  "advanced.enable": "启用",
+  "advanced.retention": "删除 30 天前的会话",
 };
 
 const dicts = { en, zh };

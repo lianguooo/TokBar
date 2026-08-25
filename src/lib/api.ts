@@ -152,6 +152,108 @@ export interface RetentionResult {
   pendingFiles: number;
 }
 
+// --- Opt-in features -----------------------------------------------------
+// Both default to off and are gated in Rust as well, so a disabled feature
+// cannot be reached even if the UI is bypassed.
+
+export interface CodexInjectStatus {
+  /** Supervisor thread is alive. */
+  running: boolean;
+  /** CDP connected and the delete button installed in Codex. */
+  attached: boolean;
+  debugPort: number;
+  codexAppPath: string;
+  lastError: string;
+  /** Codex is up but has no debug port, so it must be relaunched. */
+  needsRelaunch: boolean;
+}
+
+export interface FeatureFlags {
+  codexSwitchEnabled: boolean;
+  sessionDeleteEnabled: boolean;
+  /** Agents whose logs are one file per session; only these can be deleted
+   *  one at a time. Comes from the backend so the list cannot drift. */
+  sessionDeleteAgents: string[];
+  /** Nested under sessionDelete: show the delete button inside Codex itself. */
+  codexInjectEnabled: boolean;
+  /** Override for the Codex app bundle; empty means autodetect. */
+  codexAppPath: string;
+  codexInjectStatus: CodexInjectStatus;
+}
+
+export type FeatureFlagKey = "codexSwitch" | "sessionDelete" | "codexInject";
+
+export interface CodexAccount {
+  id: string;
+  name: string;
+  /** Model written to config.toml when this account is selected. */
+  model: string;
+}
+
+export interface CodexProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  experimentalBearerToken: string;
+  model: string;
+}
+
+export interface CodexSelection {
+  kind: "account" | "provider";
+  id: string;
+  name: string;
+}
+
+export interface CodexSwitchState {
+  accounts: CodexAccount[];
+  providers: CodexProvider[];
+  /** Selected provider id; empty means official ChatGPT. */
+  currentProvider: string;
+  officialMode: boolean;
+  /** Account `auth.json` currently holds — set in provider mode too. */
+  liveAccountId: string;
+  /** Account that is the current switch target; empty in provider mode, so
+   *  the account row always stays clickable as the way back. */
+  currentAccountId: string;
+  pendingAccount: CodexAccount | null;
+  /** A login exists but is not saved yet, so it cannot be switched back to. */
+  requiresCurrentAccountName: boolean;
+  selection: CodexSelection | null;
+  displayName: string;
+  codexHome: string;
+  /** Set once when a pending sign-in was adopted during this read. */
+  capturedAccount: CodexAccount | null;
+  /** Accounts in CodexPlusPlus's store that are not already saved here. */
+  importableAccounts: number;
+}
+
+export interface CodexSwitchResult {
+  state: CodexSwitchState;
+  /** False when the config already matched and nothing was written. */
+  changed: boolean;
+  message: string;
+}
+
+export interface SessionDeletePreview {
+  agent: string;
+  sessionId: string;
+  files: number;
+  bytes: number;
+  totalTokens: number;
+  totalCost: number;
+  /** Skipped: the log file also holds other sessions. */
+  sharedFiles: number;
+  /** Skipped: the log file changed since the last scan. */
+  staleFiles: number;
+}
+
+export interface SessionDeleteResult {
+  preview: SessionDeletePreview;
+  archivedFiles: number;
+  deletedFiles: number;
+  pendingFiles: number;
+}
+
 export interface QueryParams {
   sinceMs?: number;
   untilMs?: number;
@@ -188,6 +290,55 @@ export const api = {
   cleanupOldSessions: () => call<RetentionResult>("cleanup_old_sessions"),
   getSessionModels: (agent: string, sessionId: string, costMode?: CostMode) =>
     call<ModelRow[]>("get_session_models", { agent, sessionId, costMode }),
+  getFeatureFlags: () => call<FeatureFlags>("get_feature_flags"),
+  setFeatureFlag: (flag: FeatureFlagKey, enabled: boolean) =>
+    call<FeatureFlags>("set_feature_flag", { flag, enabled }),
+
+  codexSwitchState: () => call<CodexSwitchState>("codex_switch_state"),
+  codexSwitchSelect: (kind: "account" | "provider", id: string) =>
+    call<CodexSwitchResult>("codex_switch_select", { kind, id }),
+  codexSwitchOfficial: () => call<CodexSwitchResult>("codex_switch_official"),
+  codexProviderCreate: (p: {
+    name: string;
+    baseUrl: string;
+    bearerToken: string;
+    model: string;
+  }) => call<CodexSwitchResult>("codex_provider_create", { ...p }),
+  codexProviderUpdate: (p: {
+    id: string;
+    name: string;
+    baseUrl: string;
+    bearerToken: string;
+    model: string;
+  }) => call<CodexSwitchResult>("codex_provider_update", { ...p }),
+  codexProviderDelete: (id: string) =>
+    call<CodexSwitchResult>("codex_provider_delete", { id }),
+  /** Copy account archives across from CodexPlusPlus. */
+  codexImportAccounts: () => call<CodexSwitchResult>("codex_import_accounts"),
+  /** Adopt the current login without signing out. */
+  codexAccountCapture: (name: string, model: string) =>
+    call<CodexSwitchResult>("codex_account_capture", { name, model }),
+  /** Signs the current account out; the caller must confirm first. */
+  codexAccountAdd: (p: {
+    name: string;
+    currentAccountName: string;
+    model: string;
+  }) => call<CodexSwitchResult>("codex_account_add", { ...p }),
+  codexAccountUpdate: (p: { id: string; name: string; model: string }) =>
+    call<CodexSwitchResult>("codex_account_update", { ...p }),
+  codexAccountDelete: (id: string) =>
+    call<CodexSwitchResult>("codex_account_delete", { id }),
+
+  setCodexAppPath: (path: string) =>
+    call<FeatureFlags>("set_codex_app_path", { path }),
+  /** Relaunch Codex with the debug port and reattach. */
+  codexInjectRestart: () => call<FeatureFlags>("codex_inject_restart"),
+
+  previewSessionDelete: (agent: string, sessionId: string) =>
+    call<SessionDeletePreview>("preview_session_delete", { agent, sessionId }),
+  deleteSession: (agent: string, sessionId: string) =>
+    call<SessionDeleteResult>("delete_session", { agent, sessionId }),
+
   getTrayMode: () => call<string>("get_tray_mode"),
   setTrayMode: (mode: string) => call<void>("set_tray_mode", { mode }),
   showMainWindow: () => call<void>("show_main_window"),

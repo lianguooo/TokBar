@@ -1,23 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  LoaderCircle,
+  Search,
+  Trash2,
+} from "lucide-react";
 import {
   api,
   type ModelRow,
   type QueryParams,
+  type SessionDeletePreview,
   type SessionRow,
 } from "@/lib/api";
 import {
   agentLabel,
+  formatBytes,
   formatCost,
   formatDateTime,
   formatNumber,
   formatTokens,
   shortModelName,
 } from "@/lib/format";
+import { useFeatureFlags } from "@/lib/features";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -58,6 +68,12 @@ export function SessionsPage({
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, ModelRow[]>>({});
+  const { flags } = useFeatureFlags();
+  // Deleting a log is permanent, so the trash icon only arms a confirmation
+  // row that first shows what would actually be removed.
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +118,37 @@ export function SessionsPage({
       api
         .getSessionModels(s.agent, s.sessionId, params.costMode)
         .then((rows) => setDetail((d) => ({ ...d, [key]: rows })));
+    }
+  };
+
+  const requestDelete = async (s: SessionRow) => {
+    const key = `${s.agent}:${s.sessionId}`;
+    setPendingDelete({ key, preview: null, error: "", busy: false });
+    try {
+      const preview = await api.previewSessionDelete(s.agent, s.sessionId);
+      setPendingDelete((p) => (p?.key === key ? { ...p, preview } : p));
+    } catch (e) {
+      setPendingDelete((p) =>
+        p?.key === key ? { ...p, error: String(e) } : p,
+      );
+    }
+  };
+
+  const confirmDelete = async (s: SessionRow) => {
+    const key = `${s.agent}:${s.sessionId}`;
+    setPendingDelete((p) =>
+      p?.key === key ? { ...p, busy: true, error: "" } : p,
+    );
+    try {
+      await api.deleteSession(s.agent, s.sessionId);
+      setPendingDelete(null);
+      // Refetch rather than splicing the row out: the delete also rewrites
+      // archived totals, so the whole list is stale.
+      setAttempt((a) => a + 1);
+    } catch (e) {
+      setPendingDelete((p) =>
+        p?.key === key ? { ...p, busy: false, error: String(e) } : p,
+      );
     }
   };
 
@@ -177,6 +224,7 @@ export function SessionsPage({
               <TableHead className="text-right">{t("th.requests")}</TableHead>
               <TableHead className="text-right">{t("th.tokens")}</TableHead>
               <TableHead className="text-right">{t("th.cost")}</TableHead>
+              {flags.sessionDeleteEnabled && <TableHead className="w-10" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -190,6 +238,17 @@ export function SessionsPage({
                   isOpen={isOpen}
                   detail={detail[key]}
                   onToggle={() => toggleExpand(s)}
+                  canDelete={
+                    flags.sessionDeleteEnabled &&
+                    flags.sessionDeleteAgents.includes(s.agent)
+                  }
+                  showDeleteColumn={flags.sessionDeleteEnabled}
+                  pendingDelete={
+                    pendingDelete?.key === key ? pendingDelete : null
+                  }
+                  onRequestDelete={() => requestDelete(s)}
+                  onConfirmDelete={() => confirmDelete(s)}
+                  onCancelDelete={() => setPendingDelete(null)}
                 />
               );
             })}
@@ -205,18 +264,40 @@ export function SessionsPage({
   );
 }
 
+interface PendingDelete {
+  key: string;
+  preview: SessionDeletePreview | null;
+  error: string;
+  busy: boolean;
+}
+
 function SessionRowGroup({
   session: s,
   isOpen,
   detail,
   onToggle,
+  canDelete,
+  showDeleteColumn,
+  pendingDelete,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
 }: {
   session: SessionRow;
   isOpen: boolean;
   detail?: ModelRow[];
   onToggle: () => void;
+  /** This row's log can be removed (agent supported). */
+  canDelete: boolean;
+  /** The table has a delete column at all, so every row needs the cell. */
+  showDeleteColumn: boolean;
+  pendingDelete: PendingDelete | null;
+  onRequestDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
 }) {
   const { t } = useI18n();
+  const columns = showDeleteColumn ? 9 : 8;
   return (
     <>
       <TableRow
@@ -279,10 +360,39 @@ function SessionRowGroup({
         <TableCell className="text-right font-medium tabular-nums">
           {formatCost(s.cost)}
         </TableCell>
+        {showDeleteColumn && (
+          <TableCell className="pl-0 text-right">
+            {canDelete && (
+              <button
+                // The row itself toggles the detail panel; this must not.
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRequestDelete();
+                }}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                title={t("sessions.delete")}
+                aria-label={t("sessions.delete")}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </TableCell>
+        )}
       </TableRow>
+      {pendingDelete && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={columns} className="bg-destructive/5 p-0">
+            <DeleteConfirm
+              pending={pendingDelete}
+              onConfirm={onConfirmDelete}
+              onCancel={onCancelDelete}
+            />
+          </TableCell>
+        </TableRow>
+      )}
       {isOpen && (
         <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={8} className="bg-muted/30 p-0">
+          <TableCell colSpan={columns} className="bg-muted/30 p-0">
             {detail ? (
               <table className="w-full text-xs">
                 <thead>
@@ -347,5 +457,73 @@ function SessionRowGroup({
         </TableRow>
       )}
     </>
+  );
+}
+
+/** Inline confirmation for a permanent log deletion: states what will be
+ *  removed, what survives, and why the backend may have refused. */
+function DeleteConfirm({
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  pending: PendingDelete;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const preview = pending.preview;
+  const blocked =
+    !!preview &&
+    preview.files === 0 &&
+    (preview.sharedFiles > 0 || preview.staleFiles > 0);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-10 py-3">
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {t("sessions.deleteTitle")}
+        </div>
+        {preview && !blocked && (
+          <p className="text-xs text-muted-foreground">
+            {t("sessions.deleteBody", { size: formatBytes(preview.bytes) })}
+          </p>
+        )}
+        {preview && preview.sharedFiles > 0 && (
+          <p className="text-xs text-amber-500">{t("sessions.deleteShared")}</p>
+        )}
+        {preview && preview.staleFiles > 0 && (
+          <p className="text-xs text-amber-500">{t("sessions.deleteStale")}</p>
+        )}
+        {pending.error && (
+          <p className="text-xs text-destructive">
+            {t("sessions.deleteFailed")}: {pending.error}
+          </p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onCancel}
+          disabled={pending.busy}
+        >
+          {t("codexSwitch.cancel")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+          onClick={onConfirm}
+          disabled={pending.busy || !preview || blocked}
+        >
+          {pending.busy && (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          )}
+          {t("sessions.deleteConfirm")}
+        </Button>
+      </div>
+    </div>
   );
 }

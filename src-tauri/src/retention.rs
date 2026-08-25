@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::{adapters, db};
 
 pub const DEFAULT_RETENTION_DAYS: i64 = 30;
-const SUPPORTED_AGENTS: &[&str] = &[adapters::claude::AGENT, adapters::codex::AGENT];
+pub(crate) const SUPPORTED_AGENTS: &[&str] = &[adapters::claude::AGENT, adapters::codex::AGENT];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,15 +45,15 @@ pub struct RetentionResult {
 }
 
 #[derive(Debug, Clone)]
-struct CandidateFile {
-    path: String,
-    agent: String,
-    max_ts: i64,
-    mtime_ms: i64,
-    size: i64,
-    total_tokens: i64,
-    total_cost: f64,
-    sessions: HashSet<String>,
+pub(crate) struct CandidateFile {
+    pub(crate) path: String,
+    pub(crate) agent: String,
+    pub(crate) max_ts: i64,
+    pub(crate) mtime_ms: i64,
+    pub(crate) size: i64,
+    pub(crate) total_tokens: i64,
+    pub(crate) total_cost: f64,
+    pub(crate) sessions: HashSet<String>,
 }
 
 fn cutoff_ms(retention_days: i64) -> Result<i64, String> {
@@ -71,11 +71,11 @@ fn cutoff_ms(retention_days: i64) -> Result<i64, String> {
         .ok_or_else(|| "could not resolve local retention cutoff".to_string())
 }
 
-fn is_supported(agent: &str) -> bool {
+pub(crate) fn is_supported(agent: &str) -> bool {
     SUPPORTED_AGENTS.contains(&agent)
 }
 
-fn source_path_allowed(agent: &str, path: &Path) -> bool {
+pub(crate) fn source_path_allowed(agent: &str, path: &Path) -> bool {
     if !is_supported(agent)
         || path.extension().is_none_or(|ext| ext != "jsonl")
         || std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
@@ -232,6 +232,88 @@ fn build_preview(
     })
 }
 
+/// Fold one source file's usage into the cold archive, tombstone it so a
+/// later rescan cannot resurrect the rows, queue the file for deletion, and
+/// drop the live rows. Shared by age-based cleanup and single-session
+/// deletion so both leave the database in exactly the same shape.
+pub(crate) fn archive_and_forget(
+    tx: &rusqlite::Transaction<'_>,
+    candidate: &CandidateFile,
+    archived_at: i64,
+) -> Result<(), String> {
+    let key = db::source_key(&candidate.agent, &candidate.path);
+    tx.execute(
+        "INSERT INTO usage_archive (
+           source_key, date_local, agent, model,
+           input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
+           cache_read_tokens, total_tokens, requests,
+           cost_auto, cost_calculate, cost_display, archived_at_ms
+         )
+         SELECT ?1, date_local, agent, model,
+                SUM(input_tokens), SUM(output_tokens), SUM(cache_creation_5m),
+                SUM(cache_creation_1h), SUM(cache_read_tokens), SUM(total_tokens), COUNT(*),
+                SUM(COALESCE(cost_usd, calculated_cost)), SUM(calculated_cost),
+                SUM(COALESCE(cost_usd, 0)), ?2
+         FROM entries WHERE file_path = ?3
+         GROUP BY date_local, agent, model
+         ON CONFLICT(source_key, date_local, agent, model) DO UPDATE SET
+           input_tokens = usage_archive.input_tokens + excluded.input_tokens,
+           output_tokens = usage_archive.output_tokens + excluded.output_tokens,
+           cache_creation_5m = usage_archive.cache_creation_5m + excluded.cache_creation_5m,
+           cache_creation_1h = usage_archive.cache_creation_1h + excluded.cache_creation_1h,
+           cache_read_tokens = usage_archive.cache_read_tokens + excluded.cache_read_tokens,
+           total_tokens = usage_archive.total_tokens + excluded.total_tokens,
+           requests = usage_archive.requests + excluded.requests,
+           cost_auto = usage_archive.cost_auto + excluded.cost_auto,
+           cost_calculate = usage_archive.cost_calculate + excluded.cost_calculate,
+           cost_display = usage_archive.cost_display + excluded.cost_display,
+           archived_at_ms = excluded.archived_at_ms",
+        params![key, archived_at, candidate.path],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO retention_tombstones
+           (source_key, agent, archived_through_ms, purged_at_ms)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(source_key) DO UPDATE SET
+           archived_through_ms = MAX(archived_through_ms, excluded.archived_through_ms),
+           purged_at_ms = excluded.purged_at_ms",
+        params![key, candidate.agent, candidate.max_ts, archived_at],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO retention_pending_files
+           (source_key, agent, original_path, original_mtime_ms, original_size, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(source_key) DO UPDATE SET
+           original_path = excluded.original_path,
+           original_mtime_ms = excluded.original_mtime_ms,
+           original_size = excluded.original_size,
+           created_at_ms = excluded.created_at_ms,
+           last_error = ''",
+        params![
+            key,
+            candidate.agent,
+            candidate.path,
+            candidate.mtime_ms,
+            candidate.size,
+            archived_at
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM entries WHERE file_path = ?1",
+        params![candidate.path],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM scanned_files WHERE path = ?1",
+        params![candidate.path],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn preview(conn: &Connection, retention_days: i64) -> Result<RetentionPreview, String> {
     let cutoff = cutoff_ms(retention_days)?;
     let candidates = candidate_files(conn, cutoff)?;
@@ -246,76 +328,7 @@ pub fn cleanup(conn: &mut Connection, retention_days: i64) -> Result<RetentionRe
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     for candidate in &candidates {
-        let key = db::source_key(&candidate.agent, &candidate.path);
-        tx.execute(
-            "INSERT INTO usage_archive (
-               source_key, date_local, agent, model,
-               input_tokens, output_tokens, cache_creation_5m, cache_creation_1h,
-               cache_read_tokens, total_tokens, requests,
-               cost_auto, cost_calculate, cost_display, archived_at_ms
-             )
-             SELECT ?1, date_local, agent, model,
-                    SUM(input_tokens), SUM(output_tokens), SUM(cache_creation_5m),
-                    SUM(cache_creation_1h), SUM(cache_read_tokens), SUM(total_tokens), COUNT(*),
-                    SUM(COALESCE(cost_usd, calculated_cost)), SUM(calculated_cost),
-                    SUM(COALESCE(cost_usd, 0)), ?2
-             FROM entries WHERE file_path = ?3
-             GROUP BY date_local, agent, model
-             ON CONFLICT(source_key, date_local, agent, model) DO UPDATE SET
-               input_tokens = usage_archive.input_tokens + excluded.input_tokens,
-               output_tokens = usage_archive.output_tokens + excluded.output_tokens,
-               cache_creation_5m = usage_archive.cache_creation_5m + excluded.cache_creation_5m,
-               cache_creation_1h = usage_archive.cache_creation_1h + excluded.cache_creation_1h,
-               cache_read_tokens = usage_archive.cache_read_tokens + excluded.cache_read_tokens,
-               total_tokens = usage_archive.total_tokens + excluded.total_tokens,
-               requests = usage_archive.requests + excluded.requests,
-               cost_auto = usage_archive.cost_auto + excluded.cost_auto,
-               cost_calculate = usage_archive.cost_calculate + excluded.cost_calculate,
-               cost_display = usage_archive.cost_display + excluded.cost_display,
-               archived_at_ms = excluded.archived_at_ms",
-            params![key, archived_at, candidate.path],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "INSERT INTO retention_tombstones
-               (source_key, agent, archived_through_ms, purged_at_ms)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(source_key) DO UPDATE SET
-               archived_through_ms = MAX(archived_through_ms, excluded.archived_through_ms),
-               purged_at_ms = excluded.purged_at_ms",
-            params![key, candidate.agent, candidate.max_ts, archived_at],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "INSERT INTO retention_pending_files
-               (source_key, agent, original_path, original_mtime_ms, original_size, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(source_key) DO UPDATE SET
-               original_path = excluded.original_path,
-               original_mtime_ms = excluded.original_mtime_ms,
-               original_size = excluded.original_size,
-               created_at_ms = excluded.created_at_ms,
-               last_error = ''",
-            params![
-                key,
-                candidate.agent,
-                candidate.path,
-                candidate.mtime_ms,
-                candidate.size,
-                archived_at
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM entries WHERE file_path = ?1",
-            params![candidate.path],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM scanned_files WHERE path = ?1",
-            params![candidate.path],
-        )
-        .map_err(|e| e.to_string())?;
+        archive_and_forget(&tx, candidate, archived_at)?;
     }
     tx.commit().map_err(|e| e.to_string())?;
 
@@ -404,12 +417,14 @@ pub fn retry_pending_deletions(conn: &Connection) -> Result<(usize, usize), Stri
     Ok((deleted, pending.max(0) as usize))
 }
 
+/// Tests in several modules repoint `CLAUDE_CONFIG_DIR` to a temp tree. The
+/// variable is process-wide, so they must not overlap.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn cleanup_deletes_old_claude_file_and_keeps_daily_usage() {

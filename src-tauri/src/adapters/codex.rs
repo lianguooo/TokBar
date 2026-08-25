@@ -101,6 +101,20 @@ fn codex_homes() -> Vec<PathBuf> {
     bases
 }
 
+/// 主 Codex home：配置改写（provider / auth.json 切换）的唯一目标。
+/// 与扫描用的 `codex_homes()` 不同 —— 那份会排序去重并带上克隆目录，
+/// 这里必须取 $CODEX_HOME 的第一项，没有则回落 ~/.codex。
+pub fn primary_home() -> PathBuf {
+    if let Ok(raw) = std::env::var("CODEX_HOME") {
+        if let Some(first) = raw.split(',').map(str::trim).find(|part| !part.is_empty()) {
+            return PathBuf::from(first);
+        }
+    }
+    dirs::home_dir()
+        .map(|home| home.join(".codex"))
+        .unwrap_or_else(|| PathBuf::from(".codex"))
+}
+
 /// Codex usage dirs: `sessions/` plus `archived_sessions/` (ccusage
 /// scans both) under every Codex home.
 pub fn data_dirs() -> Vec<PathBuf> {

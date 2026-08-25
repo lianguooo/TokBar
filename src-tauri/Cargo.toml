@@ -22,6 +22,10 @@ tauri-plugin-process = "2"
 notify = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.22"
+# Blocking WebSocket for the Chrome DevTools Protocol connection to Codex.
+# No TLS features: the debug endpoint is plain ws:// on loopback only.
+tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"

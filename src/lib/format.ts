@@ -109,3 +109,12 @@ export function agentLabel(agent: string): string {
 export function agentColor(agent: string, index = 0): string {
   return AGENT_COLORS[agent] ?? CHART_PALETTE[index % CHART_PALETTE.length];
 }
+
+/** Human-readable byte size, used by the retention preview and the
+ *  per-session delete confirmation. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}

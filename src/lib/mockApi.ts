@@ -5,16 +5,98 @@
 
 import type {
   Block,
+  CodexAccount,
+  CodexProvider,
+  CodexSwitchResult,
+  CodexSwitchState,
   DailyRow,
+  FeatureFlags,
   ModelRow,
   Overview,
   ProjectRow,
   RetentionPreview,
   RetentionResult,
   ScanStats,
+  SessionDeletePreview,
+  SessionDeleteResult,
   SessionRow,
   SourceInfo,
 } from "./api";
+
+// --- Opt-in features -----------------------------------------------------
+// Seeded so the browser preview can exercise the switcher and the delete
+// confirmation without a Codex install. Mutations are in-memory only.
+
+const flags: FeatureFlags = {
+  codexSwitchEnabled: false,
+  sessionDeleteEnabled: false,
+  sessionDeleteAgents: ["claude-code", "codex"],
+  codexInjectEnabled: false,
+  codexAppPath: "",
+  codexInjectStatus: {
+    running: false,
+    attached: false,
+    debugPort: 9229,
+    codexAppPath: "/Applications/ChatGPT.app",
+    lastError: "",
+    needsRelaunch: false,
+  },
+};
+
+let mockAccounts: CodexAccount[] = [
+  { id: "acct-plus", name: "plus", model: "gpt-5.2-codex" },
+];
+let mockProviders: CodexProvider[] = [
+  {
+    id: "provider-relay",
+    name: "relay",
+    baseUrl: "https://relay.example.com/v1",
+    experimentalBearerToken: "sk-mock-token",
+    model: "gpt-5.2-codex",
+  },
+];
+let mockCurrentProvider = "";
+/** Whoever auth.json holds. Unchanged by provider switches, on purpose. */
+const mockLiveAccountId = "acct-plus";
+
+function codexState(captured: CodexAccount | null = null): CodexSwitchState {
+  const officialMode = mockCurrentProvider === "";
+  return {
+    accounts: mockAccounts,
+    providers: mockProviders,
+    currentProvider: mockCurrentProvider,
+    officialMode,
+    liveAccountId: mockLiveAccountId,
+    currentAccountId: officialMode ? mockLiveAccountId : "",
+    pendingAccount: null,
+    requiresCurrentAccountName: false,
+    selection: null,
+    displayName:
+      mockProviders.find((p) => p.id === mockCurrentProvider)?.name ??
+      mockAccounts.find((a) => a.id === mockLiveAccountId)?.name ??
+      "ChatGPT",
+    codexHome: "/Users/preview/.codex",
+    capturedAccount: captured,
+    importableAccounts: mockAccounts.some((a) => a.name === "pro") ? 0 : 1,
+  };
+}
+
+function codexResult(message: string, changed = true): CodexSwitchResult {
+  return { state: codexState(), changed, message };
+}
+
+function sessionDeletePreview(args?: Record<string, unknown>): SessionDeletePreview {
+  return {
+    agent: String(args?.agent ?? "codex"),
+    sessionId: String(args?.sessionId ?? "session"),
+    files: 1,
+    bytes: 268_412,
+    totalTokens: 184_233,
+    totalCost: 1.82,
+    sharedFiles: 0,
+    staleFiles: 0,
+  };
+}
 
 /** Small LCG; stable across reloads for a given seed. */
 function makeRng(seed: number) {
@@ -439,6 +521,106 @@ export async function mockInvoke<T>(
           (r) => r.agent === (args?.agent as string),
         ),
       ) as T;
+    case "get_feature_flags":
+      return { ...flags } as T;
+    case "set_feature_flag": {
+      const enabled = args?.enabled === true;
+      if (args?.flag === "codexSwitch") flags.codexSwitchEnabled = enabled;
+      else if (args?.flag === "codexInject") flags.codexInjectEnabled = enabled;
+      else {
+        flags.sessionDeleteEnabled = enabled;
+        if (!enabled) flags.codexInjectEnabled = false;
+      }
+      flags.codexInjectStatus = {
+        ...flags.codexInjectStatus,
+        running: flags.sessionDeleteEnabled && flags.codexInjectEnabled,
+        attached: flags.sessionDeleteEnabled && flags.codexInjectEnabled,
+      };
+
+      return { ...flags } as T;
+    }
+    case "codex_switch_state":
+      return codexState() as T;
+    case "codex_switch_select": {
+      const id = String(args?.id ?? "");
+      mockCurrentProvider = args?.kind === "provider" ? id : "";
+      return codexResult(`Switched to ${id}`) as T;
+    }
+    case "codex_switch_official": {
+      const changed = mockCurrentProvider !== "";
+      mockCurrentProvider = "";
+      return codexResult("Switched to official ChatGPT", changed) as T;
+    }
+    case "codex_provider_create": {
+      const provider: CodexProvider = {
+        id: `provider-${mockProviders.length + 1}`,
+        name: String(args?.name ?? "provider"),
+        baseUrl: String(args?.baseUrl ?? ""),
+        experimentalBearerToken: String(args?.bearerToken ?? ""),
+        model: String(args?.model ?? ""),
+      };
+      mockProviders = [...mockProviders, provider];
+      mockCurrentProvider = provider.id;
+      return codexResult(`Added provider ${provider.name}`) as T;
+    }
+    case "codex_provider_update": {
+      mockProviders = mockProviders.map((p) =>
+        p.id === args?.id
+          ? {
+              ...p,
+              name: String(args?.name ?? p.name),
+              baseUrl: String(args?.baseUrl ?? p.baseUrl),
+              experimentalBearerToken: String(args?.bearerToken ?? ""),
+              model: String(args?.model ?? p.model),
+            }
+          : p,
+      );
+      return codexResult("Updated provider") as T;
+    }
+    case "codex_provider_delete":
+      mockProviders = mockProviders.filter((p) => p.id !== args?.id);
+      return codexResult("Deleted provider") as T;
+    case "codex_import_accounts": {
+      const account: CodexAccount = { id: "acct-pro-imported", name: "pro", model: "gpt-5.2-codex" };
+      if (!mockAccounts.some((a) => a.name === "pro")) mockAccounts = [...mockAccounts, account];
+      return codexResult("Imported pro") as T;
+    }
+    case "codex_account_capture":
+    case "codex_account_add": {
+      const account: CodexAccount = {
+        id: `acct-${mockAccounts.length + 1}`,
+        name: String(args?.name ?? "account"),
+        model: String(args?.model ?? ""),
+      };
+      mockAccounts = [...mockAccounts, account];
+      return codexResult(`Saved account ${account.name}`) as T;
+    }
+    case "codex_account_update": {
+      mockAccounts = mockAccounts.map((a) =>
+        a.id === args?.id
+          ? { ...a, name: String(args?.name ?? a.name), model: String(args?.model ?? a.model) }
+          : a,
+      );
+      return codexResult("Updated account") as T;
+    }
+    case "codex_account_delete":
+      mockAccounts = mockAccounts.filter((a) => a.id !== args?.id);
+      return codexResult("Deleted account") as T;
+    case "set_codex_app_path":
+      flags.codexAppPath = String(args?.path ?? "");
+      return { ...flags } as T;
+    case "codex_inject_restart":
+      flags.codexInjectStatus = { ...flags.codexInjectStatus, running: true, attached: true };
+      return { ...flags } as T;
+    case "preview_session_delete":
+      return sessionDeletePreview(args) as T;
+    case "delete_session":
+      return {
+        preview: sessionDeletePreview(args),
+        archivedFiles: 1,
+        deletedFiles: 1,
+        pendingFiles: 0,
+      } satisfies SessionDeleteResult as T;
     case "get_tray_mode":
       return trayMode as T;
     case "set_tray_mode":
