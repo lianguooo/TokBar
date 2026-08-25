@@ -11,6 +11,17 @@ export function formatCost(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** Higher precision for live headline totals, where a successful refresh
+ * should remain visible even when one request costs less than half a cent. */
+export function formatLiveCost(value: number): string {
+  if (value >= 1000) {
+    return `$${(value / 1000).toFixed(2)}k`;
+  }
+  return value > 0 && value < 100
+    ? `$${value.toFixed(4)}`
+    : `$${value.toFixed(2)}`;
+}
+
 export function formatTokens(value: number): string {
   if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
   if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`;

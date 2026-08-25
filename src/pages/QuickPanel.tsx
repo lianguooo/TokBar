@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { Check, Flame, LayoutDashboard, RefreshCw } from "lucide-react";
 import { IN_TAURI, api, onEvent, type Block } from "@/lib/api";
-import { formatCost, formatNumber, formatTime, formatTokens } from "@/lib/format";
+import {
+  formatCost,
+  formatLiveCost,
+  formatNumber,
+  formatTime,
+  formatTokens,
+} from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/Logo";
@@ -128,7 +134,7 @@ export function QuickPanel() {
       >
         <div className="text-xs text-muted-foreground">{t("quick.todayCost")}</div>
         <div className="mt-1 text-3xl font-bold tabular-nums text-primary">
-          {stats ? formatCost(stats.todayCost) : "—"}
+          {stats ? formatLiveCost(stats.todayCost) : "—"}
         </div>
       </button>
 
@@ -146,7 +152,7 @@ export function QuickPanel() {
         />
         <MiniStat
           label={t("quick.monthCost")}
-          value={stats ? formatCost(stats.monthCost) : "—"}
+          value={stats ? formatLiveCost(stats.monthCost) : "—"}
           onClick={() => openPage("trends")}
         />
       </div>

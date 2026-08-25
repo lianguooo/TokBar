@@ -9,8 +9,10 @@ pub mod retention;
 pub mod session_delete;
 pub mod types;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
@@ -114,11 +116,19 @@ fn format_tokens_short(n: i64) -> String {
     if n >= 1e9 {
         format!("{:.2}B", n / 1e9)
     } else if n >= 1e6 {
-        format!("{:.1}M", n / 1e6)
+        format!("{:.2}M", n / 1e6)
     } else if n >= 1e3 {
         format!("{:.1}K", n / 1e3)
     } else {
         format!("{n:.0}")
+    }
+}
+
+fn format_cost_short(cost: f64) -> String {
+    if cost > 0.0 && cost < 100.0 {
+        format!("${cost:.4}")
+    } else {
+        format!("${cost:.2}")
     }
 }
 
@@ -220,11 +230,12 @@ fn update_tray_title(app: &tauri::AppHandle, state: &tauri::State<AppState>) {
         let title = match settings.tray_mode.as_str() {
             "off" => String::new(),
             "tokens" => format_tokens_short(tokens),
-            _ => format!("${cost:.2}"),
+            _ => format_cost_short(cost),
         };
         let _ = tray.set_title(Some(title));
         let _ = tray.set_tooltip(Some(format!(
-            "TokBar — today ${cost:.2} / {}",
+            "TokBar — today {} / {}",
+            format_cost_short(cost),
             format_tokens_short(tokens)
         )));
     }
@@ -721,57 +732,237 @@ fn cleanup_old_sessions(
     Ok(result)
 }
 
-/// Watch all agent log directories and rescan automatically (debounced)
-/// when anything changes, then notify every window.
-fn spawn_usage_watcher(handle: tauri::AppHandle) {
+enum UsageWatchSignal {
+    Changed,
+    Error(String),
+}
+
+const WATCH_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
+const WATCH_FALLBACK_SCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const WATCH_QUIET_PERIOD: Duration = Duration::from_secs(2);
+const WATCH_MAX_DEBOUNCE: Duration = Duration::from_secs(10);
+
+fn usage_data_dirs() -> HashSet<PathBuf> {
+    adapters::ALL
+        .iter()
+        .flat_map(|adapter| (adapter.data_dirs)())
+        .collect()
+}
+
+/// Add newly-created agent directories, remove vanished ones, and keep failed
+/// registrations eligible for the next 30-second reconciliation pass.
+fn reconcile_usage_watches(
+    watcher: &mut notify::RecommendedWatcher,
+    watched: &mut HashSet<PathBuf>,
+) -> (usize, usize) {
     use notify::{RecursiveMode, Watcher};
-    std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
-        let mut watcher = match notify::recommended_watcher(
+
+    let desired = usage_data_dirs();
+    let removed: Vec<PathBuf> = watched.difference(&desired).cloned().collect();
+    for dir in removed {
+        if let Err(error) = watcher.unwatch(&dir) {
+            eprintln!("usage watcher failed to remove {}: {error}", dir.display());
+        }
+        watched.remove(&dir);
+    }
+
+    let mut added = 0;
+    let mut failed = 0;
+    let pending: Vec<PathBuf> = desired.difference(watched).cloned().collect();
+    for dir in pending {
+        match watcher.watch(&dir, RecursiveMode::Recursive) {
+            Ok(()) => {
+                watched.insert(dir);
+                added += 1;
+            }
+            Err(error) => {
+                failed += 1;
+                eprintln!("usage watcher failed to watch {}: {error}", dir.display());
+            }
+        }
+    }
+    (added, failed)
+}
+
+enum UsageQuietResult {
+    Ready { watch_error: bool },
+    Disconnected,
+}
+
+/// Coalesce bursts, but never postpone a scan forever while a busy agent keeps
+/// appending events. Preserve whether notify reported an error during the burst
+/// so the caller can rebuild every registration after scanning.
+fn wait_for_usage_quiet(
+    rx: &std::sync::mpsc::Receiver<UsageWatchSignal>,
+) -> UsageQuietResult {
+    let started = Instant::now();
+    let mut watch_error = false;
+    loop {
+        let remaining = WATCH_MAX_DEBOUNCE.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return UsageQuietResult::Ready { watch_error };
+        }
+        match rx.recv_timeout(WATCH_QUIET_PERIOD.min(remaining)) {
+            Ok(UsageWatchSignal::Changed) => {}
+            Ok(UsageWatchSignal::Error(error)) => {
+                eprintln!("usage watcher event error: {error}");
+                watch_error = true;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return UsageQuietResult::Ready { watch_error };
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return UsageQuietResult::Disconnected;
+            }
+        }
+    }
+}
+
+fn reset_usage_watches(
+    watcher: &mut notify::RecommendedWatcher,
+    watched: &mut HashSet<PathBuf>,
+) {
+    use notify::Watcher;
+
+    for dir in watched.drain() {
+        let _ = watcher.unwatch(&dir);
+    }
+}
+
+/// Watch all current and future agent log directories. Native notifications
+/// are the fast path; a central five-minute scan covers events the OS misses,
+/// and failed watchers/scans are retried without requiring a visible window.
+fn spawn_usage_watcher(handle: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        let (tx, rx) = std::sync::mpsc::channel::<UsageWatchSignal>();
+        let watcher = notify::recommended_watcher(
             move |res: Result<notify::Event, notify::Error>| {
-                if res.is_ok() {
-                    let _ = tx.send(());
-                }
+                let signal = match res {
+                    // Scanning reads the same files. Ignoring access-only
+                    // notifications prevents a read -> event -> scan loop on
+                    // backends that report open/read/close operations.
+                    Ok(event) if !event.kind.is_access() => UsageWatchSignal::Changed,
+                    Ok(_) => return,
+                    Err(error) => UsageWatchSignal::Error(error.to_string()),
+                };
+                let _ = tx.send(signal);
             },
-        ) {
-            Ok(w) => w,
-            Err(_) => return,
+        );
+        let mut watcher = match watcher {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("usage watcher initialization failed: {error}");
+                scan_and_broadcast_with_retry(&handle);
+                std::thread::sleep(WATCH_RECONCILE_INTERVAL);
+                continue;
+            }
         };
-        let dirs: Vec<PathBuf> = adapters::ALL
-            .iter()
-            .flat_map(|a| (a.data_dirs)())
-            .collect();
-        for dir in &dirs {
-            let _ = watcher.watch(dir, RecursiveMode::Recursive);
+
+        let mut watched = HashSet::new();
+        let mut last_successful_scan = Some(Instant::now());
+        let mut local_day = chrono::Local::now().date_naive();
+        let (added, failed) = reconcile_usage_watches(&mut watcher, &mut watched);
+        if added > 0 || failed > 0 {
+            if scan_and_broadcast_with_retry(&handle) {
+                last_successful_scan = Some(Instant::now());
+            } else {
+                last_successful_scan = None;
+            }
         }
-        if dirs.is_empty() {
-            return;
-        }
-        while rx.recv().is_ok() {
-            // Debounce: wait until the directories have been quiet for 2s.
-            while rx
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .is_ok()
-            {}
-            scan_and_broadcast(&handle);
+
+        loop {
+            let mut should_scan = false;
+            let mut disconnected = false;
+            match rx.recv_timeout(WATCH_RECONCILE_INTERVAL) {
+                Ok(UsageWatchSignal::Changed) => {
+                    should_scan = true;
+                    match wait_for_usage_quiet(&rx) {
+                        UsageQuietResult::Ready { watch_error } => {
+                            if watch_error {
+                                reset_usage_watches(&mut watcher, &mut watched);
+                            }
+                        }
+                        UsageQuietResult::Disconnected => disconnected = true,
+                    }
+                }
+                Ok(UsageWatchSignal::Error(error)) => {
+                    eprintln!("usage watcher event error: {error}");
+                    reset_usage_watches(&mut watcher, &mut watched);
+                    should_scan = true;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+
+            let (added, failed) = reconcile_usage_watches(&mut watcher, &mut watched);
+            should_scan |= added > 0 || failed > 0;
+            should_scan |= last_successful_scan
+                .map_or(true, |last| last.elapsed() >= WATCH_FALLBACK_SCAN_INTERVAL);
+
+            let today = chrono::Local::now().date_naive();
+            let day_changed = today != local_day;
+            local_day = today;
+
+            if should_scan {
+                if scan_and_broadcast_with_retry(&handle) {
+                    last_successful_scan = Some(Instant::now());
+                } else {
+                    // Retry on the next reconciliation pass instead of waiting
+                    // five minutes or for another filesystem event.
+                    last_successful_scan = None;
+                }
+            } else if day_changed {
+                // No source file needs parsing at midnight, but today's tray
+                // total and every rolling UI range must move to the new day.
+                let state: tauri::State<AppState> = handle.state();
+                update_tray_title(&handle, &state);
+                let _ = handle.emit("usage-updated", ());
+            }
+
+            if disconnected {
+                break;
+            }
         }
     });
 }
 
-fn scan_and_broadcast(handle: &tauri::AppHandle) {
+fn scan_and_broadcast(handle: &tauri::AppHandle) -> Result<db::ScanStats, String> {
     let state: tauri::State<AppState> = handle.state();
-    {
-        let Ok(_scan_guard) = state.scan_lock.lock() else { return };
-        let Ok(pricing) = state.pricing.lock() else { return };
+    let stats = {
+        let _scan_guard = state.scan_lock.lock().map_err(|e| e.to_string())?;
+        let pricing = state.pricing.lock().map_err(|e| e.to_string())?;
         let progress_app = handle.clone();
-        let _ = db::scan_all(&state.conn, &pricing, move |done, total| {
+        db::scan_all(&state.conn, &pricing, move |done, total| {
             let _ = progress_app.emit("scan-progress", serde_json::json!({
                 "done": done, "total": total
             }));
-        });
-    }
+        })?
+    };
     update_tray_title(handle, &state);
     let _ = handle.emit("usage-updated", ());
+    Ok(stats)
+}
+
+fn scan_and_broadcast_with_retry(handle: &tauri::AppHandle) -> bool {
+    const RETRY_DELAYS: [Duration; 3] = [
+        Duration::ZERO,
+        Duration::from_secs(1),
+        Duration::from_secs(3),
+    ];
+    for (attempt, delay) in RETRY_DELAYS.into_iter().enumerate() {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+        match scan_and_broadcast(handle) {
+            Ok(_) => return true,
+            Err(error) => eprintln!(
+                "usage scan failed (attempt {}/{}): {error}",
+                attempt + 1,
+                RETRY_DELAYS.len()
+            ),
+        }
+    }
+    false
 }
 
 #[tauri::command]

@@ -20,6 +20,7 @@ import {
   agentColor,
   agentLabel,
   formatCost,
+  formatLiveCost,
   formatNumber,
   formatTokens,
   shortModelName,
@@ -142,7 +143,7 @@ export function OverviewPage({
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           title={t("overview.totalCost")}
-          value={formatCost(tot?.cost ?? 0)}
+          value={formatLiveCost(tot?.cost ?? 0)}
           sub={t("overview.activeDays", { n: tot?.activeDays ?? 0 })}
           icon={DollarSign}
         />

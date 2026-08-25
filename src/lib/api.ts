@@ -266,7 +266,9 @@ export function rangeToSinceMs(range: RangeKey): number | undefined {
   const days = { today: 1, "7d": 7, "30d": 30, "90d": 90 }[range];
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  return start.getTime() - (days - 1) * 86_400_000;
+  // Calendar arithmetic keeps the boundary at local midnight across DST.
+  start.setDate(start.getDate() - (days - 1));
+  return start.getTime();
 }
 
 export const api = {

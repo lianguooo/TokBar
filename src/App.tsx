@@ -146,15 +146,11 @@ function App() {
   useEffect(() => localStorage.setItem(RANGE_KEY, range), [range]);
   useEffect(() => localStorage.setItem(COST_MODE_KEY, costMode), [costMode]);
 
-  // Initial scan on launch. Live updates arrive via the backend file
-  // watcher ("usage-updated"); a 5-minute rescan remains as a fallback,
-  // skipped while the window is hidden in the tray (closing only hides
-  // it) — no point burning disk scans nobody is looking at.
+  // Initial scan on launch. Live updates and the central five-minute fallback
+  // both arrive from the backend as "usage-updated", so hidden windows stay
+  // current without running their own duplicate disk scan timer.
   useEffect(() => {
     refresh();
-    const timer = setInterval(() => {
-      if (!document.hidden) refresh();
-    }, 300_000);
     const unlistenUpdate = onEvent("usage-updated", () => {
       setRefreshKey((k) => k + 1);
     });
@@ -171,7 +167,6 @@ function App() {
       }
     });
     return () => {
-      clearInterval(timer);
       unlistenUpdate.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
       unlistenNav.then((fn) => fn());
@@ -180,7 +175,9 @@ function App() {
 
   const params: QueryParams = useMemo(
     () => ({ sinceMs: rangeToSinceMs(range), costMode }),
-    [range, costMode],
+    // refreshKey also advances at midnight, so "today" and rolling ranges
+    // recalculate their local-day boundary while the app stays open.
+    [range, costMode, refreshKey],
   );
 
   const showRange = page !== "blocks" && page !== "settings";
