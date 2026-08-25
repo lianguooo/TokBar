@@ -125,11 +125,7 @@ fn format_tokens_short(n: i64) -> String {
 }
 
 fn format_cost_short(cost: f64) -> String {
-    if cost > 0.0 && cost < 100.0 {
-        format!("${cost:.4}")
-    } else {
-        format!("${cost:.2}")
-    }
+    format!("${cost:.2}")
 }
 
 fn parse_mode(mode: Option<String>) -> CostMode {
