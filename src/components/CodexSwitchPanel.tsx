@@ -237,27 +237,6 @@ export function CodexSwitchPanel() {
         </div>
       )}
 
-      {/* Official ChatGPT: the way back when no archived account matches. */}
-      <Row
-        title={t("codexSwitch.official")}
-        subtitle={t("codexSwitch.officialDesc")}
-        badges={
-          state.officialMode
-            ? [{ label: t("codexSwitch.current"), variant: "success" as const }]
-            : []
-        }
-        actions={
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || state.officialMode}
-            onClick={() => run(() => api.codexSwitchOfficial())}
-          >
-            {t("codexSwitch.use")}
-          </Button>
-        }
-      />
-
       <Section title={t("codexSwitch.accounts")}>
         {state.accounts.map((account) => (
           <AccountRow

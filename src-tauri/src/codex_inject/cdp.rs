@@ -5,7 +5,7 @@
 //! nothing and add two dependency trees. Only what the injection needs is
 //! implemented -- list targets, send commands, pump `Runtime.bindingCalled`.
 
-use std::net::TcpStream;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -14,6 +14,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(3);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -70,9 +71,19 @@ impl Target {
     }
 }
 
-/// True when something is already serving CDP on this port.
+/// True when the loopback port accepts a connection.
+///
+/// The caller only uses this as a cheap readiness probe before `list_targets`
+/// performs the real CDP validation. Keeping the probe at the TCP layer avoids
+/// proxy-aware HTTP clients stalling the Tauri command thread on Windows when
+/// Codex is not running.
 pub fn is_listening(port: u16) -> bool {
-    list_targets(port).is_ok()
+    [
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port),
+    ]
+    .into_iter()
+    .any(|address| TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok())
 }
 
 pub fn list_targets(port: u16) -> Result<Vec<Target>, String> {
@@ -196,6 +207,14 @@ impl CdpSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_an_open_loopback_port_without_an_http_request() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(is_listening(port));
+    }
 
     fn page(url: &str) -> Target {
         Target {

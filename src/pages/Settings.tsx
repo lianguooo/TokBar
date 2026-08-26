@@ -28,6 +28,7 @@ import {
   agentBrand,
   subscriptionBrand,
 } from "@/components/BrandIcon";
+import { SoftwareUpdateCard } from "@/components/SoftwareUpdateCard";
 import { ACCENTS, useTheme, type AccentKey, type ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -547,6 +548,8 @@ export function SettingsPage({
           )}
         </CardContent>
       </Card>
+
+      <SoftwareUpdateCard />
 
       <Card>
         <CardHeader className="flex-row items-center gap-2 space-y-0">

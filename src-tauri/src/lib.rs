@@ -330,11 +330,13 @@ fn read_flags(state: &tauri::State<AppState>) -> FeatureFlags {
         .ok()
         .and_then(|supervisor| supervisor.as_ref().map(|s| s.status()))
         .unwrap_or_default();
-    // Not launched by us and no debug port anywhere: the UI offers a relaunch.
-    if !codex_inject_status.running {
-        codex_inject_status.needs_relaunch = !codex_inject::cdp::is_listening(
-            codex_inject::DEFAULT_DEBUG_PORT,
-        );
+    // The status is hidden unless injection is enabled, so never touch the
+    // network for the default/off state. This used to issue two blocking HTTP
+    // probes whenever Advanced opened and could freeze WebView2 on Windows.
+    // A rare enabled-without-supervisor state still gets a bounded TCP probe.
+    if codex_inject_enabled && !codex_inject_status.running {
+        codex_inject_status.needs_relaunch =
+            !codex_inject::cdp::is_listening(codex_inject::DEFAULT_DEBUG_PORT);
     }
     FeatureFlags {
         codex_switch_enabled,
