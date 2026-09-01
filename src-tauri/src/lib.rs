@@ -512,13 +512,13 @@ fn sync_codex_inject(
         stale.stop();
     }
 
-    let app_path = codex_inject::resolve_app_path(&app_path_override)?;
+    let app_target = codex_inject::resolve_app_target(&app_path_override)?;
     let handler_app = app.clone();
     let handler: codex_inject::ActionHandler = std::sync::Arc::new(move |action, payload| {
         handle_inject_action(&handler_app, action, payload)
     });
     *slot = Some(codex_inject::start(
-        app_path,
+        app_target,
         codex_inject::DEFAULT_DEBUG_PORT,
         intent,
         handler,

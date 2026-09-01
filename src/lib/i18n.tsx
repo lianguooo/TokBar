@@ -298,7 +298,8 @@ const en = {
   "settings.codexInject": "Show the delete button inside Codex",
   "settings.codexInjectDesc":
     "Adds the same delete action to Codex’s own sidebar. Codex can only be scripted when it is started with a debug port, so turning this on quits a running Codex and reopens it once. After that TokBar never launches Codex on its own — quit it and it stays quit.",
-  "settings.codexInjectMac": "macOS only for now.",
+  "settings.codexInjectPlatforms":
+    "Supported on macOS and Windows. Microsoft Store installations are detected automatically.",
   "settings.codexInjectAttached": "Attached to Codex · port {port}",
   "settings.codexInjectWaiting": "Not attached to Codex",
   "settings.codexInjectNoAutoLaunch":
@@ -592,7 +593,8 @@ const zh: Record<keyof typeof en, string> = {
   "settings.codexInject": "在 Codex 界面内显示删除按钮",
   "settings.codexInjectDesc":
     "在 Codex 自己的侧边栏加上相同的删除操作。Codex 只有带调试端口启动才能被注入，所以打开此项会退出已在运行的 Codex 并重新打开一次。之后 TokBar 不会再自动拉起 Codex —— 你退出它就保持退出。",
-  "settings.codexInjectMac": "目前仅支持 macOS。",
+  "settings.codexInjectPlatforms":
+    "支持 macOS 和 Windows；Windows Microsoft Store 安装会自动检测。",
   "settings.codexInjectAttached": "已接入 Codex · 端口 {port}",
   "settings.codexInjectWaiting": "未接入 Codex",
   "settings.codexInjectNoAutoLaunch":

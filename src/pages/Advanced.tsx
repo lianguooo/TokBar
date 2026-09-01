@@ -175,7 +175,7 @@ export function AdvancedPage() {
                     {t("settings.codexInjectNoAutoLaunch")}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {t("settings.codexInjectMac")}
+                    {t("settings.codexInjectPlatforms")}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -214,11 +214,13 @@ export function AdvancedPage() {
                   </div>
 
                   {injectError && (
-                    <p className="text-xs text-destructive">{injectError}</p>
+                    <p className="text-xs text-destructive" role="alert">
+                      {injectError}
+                    </p>
                   )}
 
                   {flags.codexInjectStatus.lastError && (
-                    <p className="text-xs text-destructive">
+                    <p className="text-xs text-destructive" role="alert">
                       {flags.codexInjectStatus.lastError}
                     </p>
                   )}

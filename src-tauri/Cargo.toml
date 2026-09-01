@@ -1,6 +1,6 @@
 [package]
 name = "tokbar"
-version = "0.5.3"
+version = "0.5.4"
 description = "TokBar - AI Usage Dashboard"
 authors = ["TokBar"]
 edition = "2021"
@@ -31,6 +31,9 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 ureq = { version = "2", features = ["json"] }
 thiserror = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 
 [profile.release]
 lto = true

@@ -11,14 +11,14 @@
 //! then pumps binding calls until asked to stop. A page reload drops the
 //! connection; the loop simply reattaches.
 //!
-//! macOS only for now. Windows Codex ships as a Store package and needs a
-//! different activation path entirely; `launch_codex` says so rather than
-//! failing in some confusing way.
+//! Windows Store builds are activated through their AppUserModelID so the
+//! Chromium flags reach the packaged full-trust app without trying to execute
+//! its ACL-protected WindowsApps binary directly.
 
 pub mod cdp;
 pub mod threads;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -40,6 +40,19 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(45);
 /// before the old process is gone is what makes Electron's single-instance
 /// lock swallow the new one, debug flag and all.
 const QUIT_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(Debug, Clone)]
+pub struct AppTarget {
+    path: PathBuf,
+    #[cfg(target_os = "windows")]
+    app_user_model_id: Option<String>,
+}
+
+impl AppTarget {
+    fn display_path(&self) -> String {
+        self.path.to_string_lossy().to_string()
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,7 +122,7 @@ pub enum LaunchIntent {
 }
 
 pub fn start(
-    app_path: PathBuf,
+    app_target: AppTarget,
     debug_port: u16,
     intent: LaunchIntent,
     handler: ActionHandler,
@@ -118,7 +131,7 @@ pub fn start(
     let status = Arc::new(Mutex::new(InjectStatus {
         running: true,
         debug_port,
-        codex_app_path: app_path.to_string_lossy().to_string(),
+        codex_app_path: app_target.display_path(),
         ..Default::default()
     }));
     let thread_stop = Arc::clone(&stop);
@@ -126,7 +139,14 @@ pub fn start(
     let handle = std::thread::Builder::new()
         .name("codex-inject".to_string())
         .spawn(move || {
-            supervise(app_path, debug_port, intent, handler, thread_stop, thread_status);
+            supervise(
+                app_target,
+                debug_port,
+                intent,
+                handler,
+                thread_stop,
+                thread_status,
+            );
         })
         .ok();
     Supervisor {
@@ -174,7 +194,7 @@ fn set_waiting(status: &Arc<Mutex<InjectStatus>>) {
 }
 
 fn supervise(
-    app_path: PathBuf,
+    app_target: AppTarget,
     debug_port: u16,
     intent: LaunchIntent,
     handler: ActionHandler,
@@ -194,7 +214,7 @@ fn supervise(
                 continue;
             }
             LoopAction::Launch => {
-                if let Err(error) = ensure_codex_running(&app_path, debug_port, &stop) {
+                if let Err(error) = ensure_codex_running(&app_target, debug_port, &stop) {
                     set_error(&status, error);
                     sleep_interruptible(Duration::from_secs(5), &stop);
                     continue;
@@ -222,14 +242,14 @@ fn supervise(
 /// Quit a debug-less Codex, then launch one with the port open. Only called
 /// while holding the one-shot launch permit.
 fn ensure_codex_running(
-    app_path: &std::path::Path,
+    app_target: &AppTarget,
     debug_port: u16,
     stop: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    if macos_app_running(app_path) {
-        quit_codex(app_path)?;
+    if app_running(app_target)? {
+        quit_codex(app_target)?;
     }
-    launch_codex(app_path, debug_port)?;
+    launch_codex(app_target, debug_port)?;
 
     let deadline = Instant::now() + LAUNCH_TIMEOUT;
     while Instant::now() < deadline {
@@ -368,9 +388,8 @@ fn dispatch(
 
     // A failing action must still resolve the page's promise, or the UI hangs
     // on a spinner forever.
-    let result = handler(action, &payload).unwrap_or_else(|error| {
-        json!({ "status": "failed", "message": error })
-    });
+    let result = handler(action, &payload)
+        .unwrap_or_else(|error| json!({ "status": "failed", "message": error }));
     let expression = format!(
         "window.__tokbarInjectResolve({}, {})",
         serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".to_string()),
@@ -387,12 +406,13 @@ fn dispatch(
 
 /// Standard install locations, newest naming first. An explicit override in
 /// settings wins over all of them.
-pub fn resolve_app_path(override_path: &str) -> Result<PathBuf, String> {
+#[cfg(target_os = "macos")]
+pub fn resolve_app_target(override_path: &str) -> Result<AppTarget, String> {
     let trimmed = override_path.trim();
     if !trimmed.is_empty() {
         let path = PathBuf::from(trimmed);
         return if path.exists() {
-            Ok(path)
+            Ok(AppTarget { path })
         } else {
             Err(format!("Codex app not found at {trimmed}"))
         };
@@ -408,10 +428,35 @@ pub fn resolve_app_path(override_path: &str) -> Result<PathBuf, String> {
     candidates
         .into_iter()
         .find(|path| path.exists())
+        .map(|path| AppTarget { path })
         .ok_or_else(|| "could not find ChatGPT.app or Codex.app".to_string())
 }
 
-fn app_display_name(app_path: &std::path::Path) -> String {
+#[cfg(target_os = "windows")]
+pub fn resolve_app_target(override_path: &str) -> Result<AppTarget, String> {
+    let trimmed = override_path.trim();
+    if !trimmed.is_empty() {
+        let path = PathBuf::from(trimmed);
+        if !path.exists() {
+            return Err(format!("Codex app not found at {trimmed}"));
+        }
+        let packaged = is_windows_store_path(&path);
+        return Ok(AppTarget {
+            path,
+            app_user_model_id: packaged.then(|| windows_codex_aumid().to_string()),
+        });
+    }
+
+    resolve_windows_store_target()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn resolve_app_target(_override_path: &str) -> Result<AppTarget, String> {
+    Err(unsupported_platform())
+}
+
+#[cfg(target_os = "macos")]
+fn app_display_name(app_path: &Path) -> String {
     app_path
         .file_stem()
         .and_then(|name| name.to_str())
@@ -420,25 +465,32 @@ fn app_display_name(app_path: &std::path::Path) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_app_running(app_path: &std::path::Path) -> bool {
+fn app_running(app_target: &AppTarget) -> Result<bool, String> {
+    let app_path = &app_target.path;
     let script = format!(
         r#"application "{}" is running"#,
         app_display_name(app_path).replace('"', "\\\"")
     );
-    std::process::Command::new("osascript")
+    let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
         .output()
-        .ok()
-        .is_some_and(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim().eq_ignore_ascii_case("true")
-        })
+        .map_err(|error| format!("failed to inspect {}: {error}", app_path.display()))?;
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case("true"))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn macos_app_running(_app_path: &std::path::Path) -> bool {
-    false
+#[cfg(target_os = "windows")]
+fn app_running(app_target: &AppTarget) -> Result<bool, String> {
+    let output = windows_process_command(app_target, false)?;
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn app_running(_app_target: &AppTarget) -> Result<bool, String> {
+    Err(unsupported_platform())
 }
 
 /// Ask Codex to quit, then wait until the process is really gone.
@@ -448,16 +500,20 @@ fn macos_app_running(_app_path: &std::path::Path) -> bool {
 /// port, because Electron's single-instance lock hands the launch to the
 /// still-dying old process.
 #[cfg(target_os = "macos")]
-fn quit_codex(app_path: &std::path::Path) -> Result<(), String> {
+fn quit_codex(app_target: &AppTarget) -> Result<(), String> {
+    let app_path = &app_target.path;
     let name = app_display_name(app_path);
-    let script = format!(r#"tell application "{}" to quit"#, name.replace('"', "\\\""));
+    let script = format!(
+        r#"tell application "{}" to quit"#,
+        name.replace('"', "\\\"")
+    );
     let _ = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
         .status();
     let deadline = Instant::now() + QUIT_TIMEOUT;
     while Instant::now() < deadline {
-        if !macos_app_running(app_path) {
+        if !app_running(app_target)? {
             // LaunchServices needs a beat after the process exits before a new
             // instance registers cleanly.
             std::thread::sleep(Duration::from_millis(400));
@@ -471,8 +527,25 @@ fn quit_codex(app_path: &std::path::Path) -> Result<(), String> {
     ))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn quit_codex(_app_path: &std::path::Path) -> Result<(), String> {
+#[cfg(target_os = "windows")]
+fn quit_codex(app_target: &AppTarget) -> Result<(), String> {
+    windows_process_command(app_target, true)?;
+    let deadline = Instant::now() + QUIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if !app_running(app_target)? {
+            std::thread::sleep(Duration::from_millis(400));
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(format!(
+        "Codex did not quit within {}s; close it manually and retry",
+        QUIT_TIMEOUT.as_secs()
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn quit_codex(_app_target: &AppTarget) -> Result<(), String> {
     Err(unsupported_platform())
 }
 
@@ -481,7 +554,8 @@ fn quit_codex(_app_path: &std::path::Path) -> Result<(), String> {
 /// and the debug flag lands nowhere. No `-W`, so nothing has to babysit the
 /// child process.
 #[cfg(target_os = "macos")]
-fn launch_codex(app_path: &std::path::Path, debug_port: u16) -> Result<(), String> {
+fn launch_codex(app_target: &AppTarget, debug_port: u16) -> Result<(), String> {
+    let app_path = &app_target.path;
     std::process::Command::new("open")
         .arg("-n")
         .arg(app_path)
@@ -501,14 +575,193 @@ fn launch_codex(app_path: &std::path::Path, debug_port: u16) -> Result<(), Strin
         })
 }
 
-#[cfg(not(target_os = "macos"))]
-fn launch_codex(_app_path: &std::path::Path, _debug_port: u16) -> Result<(), String> {
+#[cfg(target_os = "windows")]
+fn launch_codex(app_target: &AppTarget, debug_port: u16) -> Result<(), String> {
+    let arguments = format!(
+        "--remote-debugging-port={debug_port} --remote-allow-origins=http://127.0.0.1:{debug_port}"
+    );
+    if let Some(app_user_model_id) = app_target.app_user_model_id.as_deref() {
+        return activate_windows_store_app(app_user_model_id, &arguments);
+    }
+
+    std::process::Command::new(&app_target.path)
+        .arg(format!("--remote-debugging-port={debug_port}"))
+        .arg(format!(
+            "--remote-allow-origins=http://127.0.0.1:{debug_port}"
+        ))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to launch {}: {error}", app_target.path.display()))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn launch_codex(_app_target: &AppTarget, _debug_port: u16) -> Result<(), String> {
     Err(unsupported_platform())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn unsupported_platform() -> String {
-    "the in-Codex delete button is macOS-only for now".to_string()
+    "the in-Codex delete button is only supported on macOS and Windows".to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_aumid() -> &'static str {
+    "OpenAI.Codex_2p2nqsd0c76g0!App"
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_store_path(path: &Path) -> bool {
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    normalized.contains("\\windowsapps\\openai.codex_")
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_command() -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = std::process::Command::new("powershell.exe");
+    command.creation_flags(CREATE_NO_WINDOW).args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+    ]);
+    command
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_store_target() -> Result<AppTarget, String> {
+    const SCRIPT: &str = r#"
+$package = Get-AppxPackage -Name OpenAI.Codex |
+  Sort-Object Version -Descending |
+  Select-Object -First 1
+if (-not $package) { exit 3 }
+$manifest = Get-AppxPackageManifest -Package $package.PackageFullName
+$application = $manifest.Package.Applications.Application |
+  Where-Object { $_.Id -eq 'App' } |
+  Select-Object -First 1
+if (-not $application) { exit 4 }
+$executable = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation ([string]$application.Executable)))
+[Console]::Out.WriteLine($package.PackageFamilyName + '!' + $application.Id)
+[Console]::Out.WriteLine($executable)
+"#;
+    let output = powershell_command()
+        .arg(SCRIPT)
+        .output()
+        .map_err(|error| format!("failed to inspect the Codex Store package: {error}"))?;
+    if !output.status.success() {
+        return Err(
+            "could not find the Microsoft Store Codex app; install it or enter a Codex .exe path"
+                .to_string(),
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let app_user_model_id = lines
+        .next()
+        .ok_or_else(|| "the Codex Store package has no application id".to_string())?;
+    let path = lines
+        .next()
+        .ok_or_else(|| "the Codex Store package has no executable".to_string())?;
+    Ok(AppTarget {
+        path: PathBuf::from(path),
+        app_user_model_id: Some(app_user_model_id.to_string()),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_command(
+    app_target: &AppTarget,
+    stop_processes: bool,
+) -> Result<std::process::Output, String> {
+    const FIND_SCRIPT: &str = r#"
+$target = $env:TOKBAR_CODEX_TARGET
+$packaged = $env:TOKBAR_CODEX_PACKAGED -eq '1'
+$matches = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+  try {
+    $path = $_.Path
+    if (-not $path) { return $false }
+    $exact = [IO.Path]::GetFullPath($path) -ieq [IO.Path]::GetFullPath($target)
+    if ($packaged) {
+      return $exact -or ($path -like '*\WindowsApps\OpenAI.Codex_*\app\Codex.exe') -or ($path -like '*\WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe')
+    }
+    return $exact
+  } catch { return $false }
+}
+if ($env:TOKBAR_CODEX_STOP -eq '1') {
+  # A renderer may disappear after enumeration when its main process exits.
+  # Ignore that race; the caller verifies that every matching process is gone.
+  $matches | Stop-Process -Force -ErrorAction SilentlyContinue
+} else {
+  $matches | ForEach-Object { [Console]::Out.WriteLine($_.Id) }
+}
+"#;
+    let output = powershell_command()
+        .env("TOKBAR_CODEX_TARGET", &app_target.path)
+        .env(
+            "TOKBAR_CODEX_PACKAGED",
+            if app_target.app_user_model_id.is_some() {
+                "1"
+            } else {
+                "0"
+            },
+        )
+        .env("TOKBAR_CODEX_STOP", if stop_processes { "1" } else { "0" })
+        .arg(FIND_SCRIPT)
+        .output()
+        .map_err(|error| format!("failed to inspect Codex processes: {error}"))?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "failed to manage Codex processes".to_string()
+        } else {
+            format!("failed to manage Codex processes: {stderr}")
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn activate_windows_store_app(app_user_model_id: &str, arguments: &str) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_LOCAL_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{
+        ApplicationActivationManager, IApplicationActivationManager, AO_NONE,
+    };
+
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+            .ok()
+            .map_err(|error| format!("failed to initialize Windows app activation: {error}"))?;
+        let result = (|| {
+            let manager: IApplicationActivationManager =
+                CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
+                    .map_err(|error| {
+                        format!("failed to open the Windows app activation manager: {error}")
+                    })?;
+            manager
+                .ActivateApplication(
+                    &HSTRING::from(app_user_model_id),
+                    &HSTRING::from(arguments),
+                    AO_NONE,
+                )
+                .map(|_| ())
+                .map_err(|error| format!("failed to launch the Codex Store app: {error}"))
+        })();
+        CoUninitialize();
+        result
+    }
 }
 
 fn sleep_interruptible(total: Duration, stop: &Arc<AtomicBool>) {
@@ -578,8 +831,14 @@ mod tests {
         );
 
         // Every pass after the first runs as AttachOnly.
-        assert_eq!(next_action(false, LaunchIntent::AttachOnly), LoopAction::Wait);
-        assert_eq!(next_action(false, LaunchIntent::AttachOnly), LoopAction::Wait);
+        assert_eq!(
+            next_action(false, LaunchIntent::AttachOnly),
+            LoopAction::Wait
+        );
+        assert_eq!(
+            next_action(false, LaunchIntent::AttachOnly),
+            LoopAction::Wait
+        );
     }
 
     /// The relaunch button did nothing whenever Codex was already up: the loop
@@ -587,18 +846,27 @@ mod tests {
     #[test]
     fn a_restart_relaunches_even_when_codex_is_already_serving_cdp() {
         assert_eq!(next_action(true, LaunchIntent::Restart), LoopAction::Launch);
-        assert_eq!(next_action(false, LaunchIntent::Restart), LoopAction::Launch);
+        assert_eq!(
+            next_action(false, LaunchIntent::Restart),
+            LoopAction::Launch
+        );
     }
 
     #[test]
     fn a_running_codex_is_attached_to_rather_than_restarted() {
-        assert_eq!(next_action(true, LaunchIntent::LaunchIfDown), LoopAction::Attach);
-        assert_eq!(next_action(true, LaunchIntent::AttachOnly), LoopAction::Attach);
+        assert_eq!(
+            next_action(true, LaunchIntent::LaunchIfDown),
+            LoopAction::Attach
+        );
+        assert_eq!(
+            next_action(true, LaunchIntent::AttachOnly),
+            LoopAction::Attach
+        );
     }
 
     #[test]
     fn an_explicit_app_path_must_exist() {
-        let error = resolve_app_path("/nope/Missing.app").unwrap_err();
+        let error = resolve_app_target("/nope/Missing.app").unwrap_err();
 
         assert!(error.contains("not found"), "{error}");
     }
